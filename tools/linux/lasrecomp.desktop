@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=13SentinelsRecomp
+Comment=13 Sentinels: Aegis Rim, recompiled (bring your own game files)
+Exec=lasrecomp
+Icon=lasrecomp
+Categories=Game;
+Terminal=false

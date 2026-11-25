@@ -1,0 +1,785 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "13SentinelsRecomp",
+  "repo": "WenVil/13SentinelsRecomp",
+  "inputs": [
+    {
+      "id": "game",
+      "label": "Your extracted copy of 13 Sentinels: Aegis Rim (Nintendo Switch): the folder containing exefs/ and romfs/ (Asia v1.00, US/EU v1.10 merged with update, or US/EU v1.00).",
+      "role": "game",
+      "formats": [
+        {
+          "type": "folder"
+        }
+      ],
+      "check": {
+        "file": "exefs/main"
+      }
+    }
+  ],
+  "start": {
+    "program": [
+      "13SentinelsRecomp.exe"
+    ],
+    "args": [
+      "--game-dir",
+      "{input:game}",
+      "--play"
+    ],
+    "env": {
+      "LARECOMP_DATA_ROOT": "{data}"
+    }
+  },
+  "prepare": {
+    "program": [
+      "13SentinelsRecomp.exe"
+    ],
+    "args": [
+      "--game-dir",
+      "{input:game}",
+      "--build-only"
+    ],
+    "label": "Recompiling game modules into native PC code",
+    "done": [
+      "{data}/.gamebuild/gamelib_entry.receipt"
+    ],
+    "env": {
+      "LARECOMP_DATA_ROOT": "{data}"
+    }
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "ini",
+      "file": [
+        {
+          "path": "{data}/13sentinels.ini"
+        }
+      ],
+      "game_path": "game_dir",
+      "new": {
+        "game_lang": "auto",
+        "background_input": "0"
+      }
+    }
+  ],
+  "saves": [
+    "{data}/save"
+  ],
+  "folders": {
+    "saves": [
+      {
+        "path": "{data}/save"
+      }
+    ],
+    "logs": [
+      {
+        "path": "{install}"
+      }
+    ],
+    "data": [
+      {
+        "path": "{data}"
+      }
+    ]
+  },
+  "system": {
+    "windows": {
+      "version": "10",
+      "graphics": {
+        "vulkan": "1.3"
+      }
+    }
+  },
+  "groups": [
+    {
+      "id": "Advanced",
+      "advanced": true
+    }
+  ],
+  "settings": [
+    {
+      "id": "window_mode",
+      "label": "Window",
+      "group": "Display",
+      "help": "Windowed runs in a movable window. Borderless fills the screen cleanly; Exclusive takes over the display.",
+      "choices": [
+        {
+          "label": "Windowed",
+          "set": {
+            "window_mode": "windowed",
+            "fullscreen": "0"
+          }
+        },
+        {
+          "label": "Borderless Fullscreen",
+          "set": {
+            "window_mode": "borderless",
+            "fullscreen": "1"
+          }
+        },
+        {
+          "label": "Exclusive Fullscreen",
+          "set": {
+            "window_mode": "exclusive",
+            "fullscreen": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "window_mode": "windowed",
+        "fullscreen": "0"
+      }
+    },
+    {
+      "id": "output_res",
+      "label": "Output resolution",
+      "group": "Display",
+      "help": "Target display/window output resolution. Auto matches your current screen or window size.",
+      "choices": [
+        {
+          "label": "Auto",
+          "set": {
+            "output_res": "auto"
+          }
+        },
+        {
+          "label": "720p",
+          "set": {
+            "output_res": "720p"
+          }
+        },
+        {
+          "label": "1080p",
+          "set": {
+            "output_res": "1080p"
+          }
+        },
+        {
+          "label": "1440p",
+          "set": {
+            "output_res": "1440p"
+          }
+        },
+        {
+          "label": "4K",
+          "set": {
+            "output_res": "4k"
+          }
+        }
+      ],
+      "defaults": {
+        "output_res": "auto"
+      }
+    },
+    {
+      "id": "aspect_mode",
+      "label": "Aspect ratio",
+      "group": "Display",
+      "help": "Keeps the original 16:9 framing or stretches to fill non-16:9 displays.",
+      "choices": [
+        {
+          "label": "16:9",
+          "set": {
+            "aspect_mode": "16:9"
+          }
+        },
+        {
+          "label": "Stretch",
+          "set": {
+            "aspect_mode": "stretch"
+          }
+        }
+      ],
+      "defaults": {
+        "aspect_mode": "16:9"
+      }
+    },
+    {
+      "id": "vsync_mode",
+      "label": "V-Sync",
+      "group": "Display",
+      "help": "Mailbox gives smooth frames without tearing and low latency. FIFO caps to refresh rate; Immediate minimizes latency.",
+      "choices": [
+        {
+          "label": "Mailbox (Fast)",
+          "set": {
+            "vsync_mode": "mailbox"
+          }
+        },
+        {
+          "label": "FIFO (On)",
+          "set": {
+            "vsync_mode": "fifo"
+          }
+        },
+        {
+          "label": "Immediate (Off)",
+          "set": {
+            "vsync_mode": "immediate"
+          }
+        }
+      ],
+      "defaults": {
+        "vsync_mode": "mailbox"
+      }
+    },
+    {
+      "id": "resolution",
+      "label": "Internal resolution",
+      "group": "Display",
+      "help": "Internal 3D rendering scale relative to the Switch's 1080p output. Higher values sharpen 3D scenes at greater GPU cost.",
+      "choices": [
+        {
+          "label": "Auto",
+          "set": {
+            "resolution": "auto"
+          }
+        },
+        {
+          "label": "Match display",
+          "set": {
+            "resolution": "match"
+          }
+        },
+        {
+          "label": "1x (1080p)",
+          "set": {
+            "resolution": "1x"
+          }
+        },
+        {
+          "label": "1.5x",
+          "set": {
+            "resolution": "1.5x"
+          }
+        },
+        {
+          "label": "2x (4K)",
+          "set": {
+            "resolution": "2x"
+          }
+        },
+        {
+          "label": "Dynamic",
+          "set": {
+            "resolution": "dynamic"
+          }
+        },
+        {
+          "label": "75%",
+          "set": {
+            "resolution": "75%"
+          }
+        },
+        {
+          "label": "50%",
+          "set": {
+            "resolution": "50%"
+          }
+        }
+      ],
+      "defaults": {
+        "resolution": "auto"
+      }
+    },
+    {
+      "id": "upscaler",
+      "label": "Upscaling",
+      "group": "Display",
+      "help": "How a lower internal resolution scales up to the window. AMD FSR 1 sharpens edges; Auto picks per GPU.",
+      "choices": [
+        {
+          "label": "Auto",
+          "set": {
+            "upscaler": "auto"
+          }
+        },
+        {
+          "label": "AMD FSR 1",
+          "set": {
+            "upscaler": "fsr1"
+          }
+        },
+        {
+          "label": "Bilinear",
+          "set": {
+            "upscaler": "bilinear"
+          }
+        }
+      ],
+      "defaults": {
+        "upscaler": "auto"
+      }
+    },
+    {
+      "id": "antialias",
+      "label": "Anti-aliasing",
+      "group": "Display",
+      "help": "Applies SMAA edge smoothing before scaling to the window.",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "antialias": "off"
+          }
+        },
+        {
+          "label": "SMAA",
+          "set": {
+            "antialias": "smaa"
+          }
+        }
+      ],
+      "defaults": {
+        "antialias": "off"
+      }
+    },
+    {
+      "id": "hud_mode",
+      "label": "Performance overlay",
+      "group": "Display",
+      "help": "Shows a frame-rate counter or detailed timing overlay in the corner.",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "hud_mode": "off",
+            "show_fps": "0"
+          }
+        },
+        {
+          "label": "FPS",
+          "set": {
+            "hud_mode": "fps",
+            "show_fps": "1"
+          }
+        },
+        {
+          "label": "Detailed",
+          "set": {
+            "hud_mode": "detailed",
+            "show_fps": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "hud_mode": "off",
+        "show_fps": "0"
+      }
+    },
+    {
+      "id": "volume",
+      "label": "Master volume",
+      "group": "Audio",
+      "help": "Overall audio level (0.00 to 1.00).",
+      "slider": {
+        "key": "volume",
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.05,
+        "format": "%.2f"
+      },
+      "defaults": {
+        "volume": "1.00"
+      }
+    },
+    {
+      "id": "mute_unfocused",
+      "label": "Mute when unfocused",
+      "group": "Audio",
+      "help": "Mutes game audio while the window is in the background.",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "mute_unfocused": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "mute_unfocused": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "mute_unfocused": "0"
+      }
+    },
+    {
+      "id": "audio_channels",
+      "label": "Audio channels",
+      "group": "Audio",
+      "help": "Speaker channel layout reported to the game audio mixer.",
+      "choices": [
+        {
+          "label": "Auto",
+          "set": {
+            "audio_channels": "auto"
+          }
+        },
+        {
+          "label": "Stereo",
+          "set": {
+            "audio_channels": "stereo"
+          }
+        },
+        {
+          "label": "5.1 Surround",
+          "set": {
+            "audio_channels": "5.1"
+          }
+        }
+      ],
+      "defaults": {
+        "audio_channels": "auto"
+      }
+    },
+    {
+      "id": "ui_lang",
+      "label": "Overlay language",
+      "group": "Language",
+      "help": "Language used by the built-in F1 settings overlay.",
+      "choices": [
+        {
+          "label": "Auto (System)",
+          "set": {
+            "ui_lang": "auto"
+          }
+        },
+        {
+          "label": "English",
+          "set": {
+            "ui_lang": "en"
+          }
+        },
+        {
+          "label": "Simplified Chinese",
+          "set": {
+            "ui_lang": "zh-Hans"
+          }
+        },
+        {
+          "label": "Traditional Chinese",
+          "set": {
+            "ui_lang": "zh-Hant"
+          }
+        },
+        {
+          "label": "Japanese",
+          "set": {
+            "ui_lang": "ja"
+          }
+        },
+        {
+          "label": "Korean",
+          "set": {
+            "ui_lang": "ko"
+          }
+        }
+      ],
+      "defaults": {
+        "ui_lang": "auto"
+      }
+    },
+    {
+      "id": "game_lang",
+      "label": "Game text language",
+      "group": "Language",
+      "help": "In-game text language (available options depend on your Asia or US/EU copy).",
+      "choices": [
+        {
+          "label": "Auto",
+          "set": {
+            "game_lang": "auto"
+          }
+        },
+        {
+          "label": "Simplified Chinese",
+          "set": {
+            "game_lang": "zh-Hans"
+          }
+        },
+        {
+          "label": "Traditional Chinese",
+          "set": {
+            "game_lang": "zh-Hant"
+          }
+        },
+        {
+          "label": "Korean",
+          "set": {
+            "game_lang": "ko"
+          }
+        },
+        {
+          "label": "English",
+          "set": {
+            "game_lang": "en-US"
+          }
+        },
+        {
+          "label": "French",
+          "set": {
+            "game_lang": "fr"
+          }
+        },
+        {
+          "label": "German",
+          "set": {
+            "game_lang": "de"
+          }
+        },
+        {
+          "label": "Italian",
+          "set": {
+            "game_lang": "it"
+          }
+        },
+        {
+          "label": "Spanish",
+          "set": {
+            "game_lang": "es"
+          }
+        },
+        {
+          "label": "Japanese",
+          "set": {
+            "game_lang": "ja"
+          }
+        }
+      ],
+      "defaults": {
+        "game_lang": "zh-Hans"
+      }
+    },
+    {
+      "id": "pad_layout",
+      "label": "Controller layout",
+      "group": "Controls",
+      "help": "Chooses Nintendo Switch physical positions or Xbox letter positions for face buttons and overlay navigation.",
+      "choices": [
+        {
+          "label": "Nintendo",
+          "set": {
+            "pad_layout": "nintendo"
+          }
+        },
+        {
+          "label": "Xbox",
+          "set": {
+            "pad_layout": "xbox"
+          }
+        }
+      ],
+      "defaults": {
+        "pad_layout": "nintendo"
+      }
+    },
+    {
+      "id": "rumble",
+      "label": "Controller rumble",
+      "group": "Controls",
+      "help": "Enables controller vibration feedback from the game.",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "rumble": "1"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "rumble": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "rumble": "1"
+      }
+    },
+    {
+      "id": "rumble_strength",
+      "label": "Rumble strength",
+      "group": "Controls",
+      "help": "Controller vibration intensity percentage (25 to 100).",
+      "slider": {
+        "key": "rumble_strength",
+        "min": 25,
+        "max": 100,
+        "step": 5,
+        "format": "%d"
+      },
+      "when": {
+        "rumble": "1"
+      },
+      "defaults": {
+        "rumble_strength": "100",
+        "rumble": "1"
+      }
+    },
+    {
+      "id": "background_input",
+      "label": "Background controller input",
+      "group": "Controls",
+      "help": "Keep reading controllers when the game window is not focused.",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "background_input": "1"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "background_input": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "background_input": "1"
+      }
+    },
+    {
+      "id": "ls_deadzone",
+      "label": "Left stick deadzone",
+      "group": "Controls",
+      "help": "Radial deadzone percentage (0 to 40) for the left analog stick.",
+      "slider": {
+        "key": "ls_deadzone",
+        "min": 0,
+        "max": 40,
+        "step": 2,
+        "format": "%d"
+      },
+      "defaults": {
+        "ls_deadzone": "12"
+      }
+    },
+    {
+      "id": "rs_deadzone",
+      "label": "Right stick deadzone",
+      "group": "Controls",
+      "help": "Radial deadzone percentage (0 to 40) for the right analog stick.",
+      "slider": {
+        "key": "rs_deadzone",
+        "min": 0,
+        "max": 40,
+        "step": 2,
+        "format": "%d"
+      },
+      "defaults": {
+        "rs_deadzone": "12"
+      }
+    },
+    {
+      "id": "trigger_threshold",
+      "label": "Trigger threshold",
+      "group": "Controls",
+      "help": "Analog trigger activation threshold percentage (10 to 90) for ZL/ZR.",
+      "slider": {
+        "key": "trigger_threshold",
+        "min": 10,
+        "max": 90,
+        "step": 5,
+        "format": "%d"
+      },
+      "defaults": {
+        "trigger_threshold": "50"
+      }
+    },
+    {
+      "id": "vk_wait_pipes",
+      "label": "Wait for shader pipelines",
+      "group": "Advanced",
+      "help": "Waits for pipeline compilation during command recording to avoid missing draws.",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "vk_wait_pipes": "1"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "vk_wait_pipes": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "vk_wait_pipes": "1"
+      }
+    },
+    {
+      "id": "vk_copy_vertices",
+      "label": "Safe vertex buffer copy",
+      "group": "Advanced",
+      "help": "Copies dynamic vertex and index ranges for safe GPU frame overlap.",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "vk_copy_vertices": "1"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "vk_copy_vertices": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "vk_copy_vertices": "1"
+      }
+    },
+    {
+      "id": "vk_gpu_overlap",
+      "label": "GPU overlap synchronization",
+      "group": "Advanced",
+      "help": "Overlaps frame fences with write-watch snapshots for higher throughput.",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "vk_gpu_overlap": "1"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "vk_gpu_overlap": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "vk_gpu_overlap": "1"
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "saves",
+      "label": "Saves",
+      "help": "Your Switch save folder (save/save_0/ROBO13.DAT).",
+      "open": "saves"
+    },
+    {
+      "id": "logs",
+      "label": "Logs",
+      "help": "13sentinelsrecomp.log and recent session backups for bug reports.",
+      "open": "logs"
+    },
+    {
+      "id": "cache",
+      "label": "Shader cache",
+      "help": "Pre-warmed Vulkan shaders under cache/. Clearing only helps if graphics look wrong after an update.",
+      "clear": "data/cache"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+# your own game files and what's made from them (building from source puts them here)
+input/
+extracted/
+generated/
+generated-*/
+/rando/
+# Nintendo fonts (users import their own; only the README ships)
+/fonts/*
+!/fonts/README.md
+# build output, caches, saves and settings
+build/
+/cache/
+save/
+/larecomp.ini
+/13sentinels.ini
+/save_backups/
+/lasgame*.dll
+/lasgame*.dll.id
+/.gamebuild/
+/gamecontrollerdb.txt
+# tools and Python environments (machine-specific)
+tools/venv/
+venv/
+__pycache__/
+.DS_Store
+
+# copyright & extracted asset isolation (Phase 0 hardening)
+work/
+ExeFS/
+RomFS/
+*.nsp
+*.nsz
+*.xci
+*.xcz
+*.nca
+*.tik
+*.cert
+*.nso
+*.nro
+*.npdm
+*.nacp
+*.fa
+*.cpk
+*.usm
+*.acb
+*.awb
+*.acf
+*.mp4
+*.dll
+*.dll.id
+*.dll.a
+*.so
+*.dylib
+*.exe
+prod.keys
+title.keys
+*.keys
