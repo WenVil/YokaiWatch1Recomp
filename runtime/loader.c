@@ -4,6 +4,7 @@
 
 #include "rt.h"
 #include "game_addresses.h"
+#include "gl/gl_backend.h"
 
 Module g_modules[4];
 int g_nmodules;
@@ -246,6 +247,7 @@ void loader_load(const char *exefs) {
         {"subsdk0", SUBSDK0_BASE, true},
     };
     for (unsigned i = 0; i < sizeof mods / sizeof mods[0]; i++) {
+        if (!strcmp(mods[i].name, "subsdk0") && gl_backend_is_active()) continue;
         snprintf(path, sizeof path, "%s/%s", exefs, mods[i].name);
         FILE *f = plat_fopen(path, "rb");
         if (!f) {

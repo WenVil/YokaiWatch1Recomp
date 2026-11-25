@@ -10,6 +10,7 @@
 #include "paths.h"
 #include "settings.h"
 #include "hle.h"
+#include "gl/gl_backend.h"
 #include "kernel.h"
 #include "rando.h"
 
@@ -35,8 +36,11 @@ static void module_init(Cpu *c, Module *m) {
     if (m->init) {
         LOG("  DT_INIT %llx\n", (unsigned long long)m->init);
         guest_call(c, m->init);
+        // NintendoSDK's __nnmusl_init_dso returns 2 in YW1, so DT_INIT already executes init_array itself.
+        if (!gl_backend_is_active()) run_array(c, m->init_array, m->init_array_sz);
+    } else {
+        run_array(c, m->init_array, m->init_array_sz);
     }
-    run_array(c, m->init_array, m->init_array_sz);
     LOG("init %s complete\n", m->name);
 }
 
@@ -213,6 +217,7 @@ void boot_prepare(const char *root, int *stage) {
 #endif
     char why[512];
     if (!game_version_select(root, why, sizeof why)) FATAL("%s\n", why);  // (the address table: game_addresses.h)
+    if (gl_backend_is_active()) gl_backend_window_init();
     if (stage) __atomic_store_n(stage, 1, __ATOMIC_RELEASE);
     if (!gamelib_load(root, why, sizeof why)) FATAL("%s\n", why);
     if (stage) __atomic_store_n(stage, 2, __ATOMIC_RELEASE);
@@ -337,6 +342,11 @@ static int run_build_only(const char *root) {
         if (!has_cpk_icase(rom_dir, "ROBO_US.CPK", "robo_us.cpk") ||
             !has_cpk_icase(rom_dir, "ROBO_PATCH_US.CPK", "robo_patch_us.cpk")) {
             fprintf(stderr, "[build-only] incomplete US/EU 1.10 romfs (ROBO_US.CPK / ROBO_PATCH_US.CPK) in: %s\n", rom_dir);
+            return 1;
+        }
+    } else if (!strncmp(gv->key, "vyw1_", 5)) {
+        if (!has_cpk_icase(rom_dir, "yw1_a.fa", "YW1_A.FA")) {
+            fprintf(stderr, "[build-only] missing core archive yw1_a.fa in: %s\n", rom_dir);
             return 1;
         }
     }

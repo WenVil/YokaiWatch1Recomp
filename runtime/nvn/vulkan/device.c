@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "../../paths.h"
+#include "../../gl/gl_backend.h"
 #include "../../rt.h"  // (HEAP_MAX: lazy_heap_predicted)
 #include "../../settings.h"
 #include "../../ui/menu.h"
@@ -953,7 +954,9 @@ uint64_t renderer_present_count(void);
 void renderer_save_texture_tex(TexBackend *b, const char *path);
 
 static uint64_t frames, total_frames, g_frame_counter;
-uint64_t renderer_present_count(void) { return total_frames; }  // (the game thread's frame: the HLE hooks')
+uint64_t renderer_present_count(void) {
+    return gl_backend_is_active() ? gl_backend_present_count() : total_frames;  // (the game thread's frame: the HLE hooks')
+}
 // The frame whose work is being translated (rqueue.h rq_frame): "once per frame" state of the translation. Without the
 // render thread, total_frames.
 uint64_t renderer_exec_frame(void) { return rq_current_item() ? rq_frame() : total_frames; }
@@ -1310,6 +1313,7 @@ static void exit_after_shot(void) {
 // the render thread after that crashed in vkQueuePresentKHR. The swapchain, surface and window are never destroyed
 // explicitly: the process ends with them.
 void backend_quit(void) {
+    if (gl_backend_is_active()) { gl_backend_quit(); return; }
     static atomic_flag once = ATOMIC_FLAG_INIT;
     if (atomic_flag_test_and_set(&once)) return;
     static int trace = -1;
@@ -1399,6 +1403,7 @@ void ui_window_apply_pending(void) {
 }
 
 void ui_window_init(void) {
+    if (gl_backend_is_active()) { gl_backend_window_init(); return; }
     if (window) return;
     atexit(quick_exit_handler);
     settings_load();
@@ -1437,19 +1442,24 @@ void ui_window_init(void) {
 }
 
 void ui_window_set_title(const char *title) {
+    if (gl_backend_is_active()) { gl_backend_window_set_title(title); return; }
     if (window && title && *title) SDL_SetWindowTitle(window, title);
 }
 
-SDL_Window *ui_window(void) { return window; }
-bool ui_window_focused(void) { return atomic_load_explicit(&g_win_focused, memory_order_relaxed); }
+SDL_Window *ui_window(void) { return gl_backend_is_active() ? gl_backend_window() : window; }
+bool ui_window_focused(void) {
+    return gl_backend_is_active() ? gl_backend_window_focused() : atomic_load_explicit(&g_win_focused, memory_order_relaxed);
+}
 
 void backend_init(void) {
+    if (gl_backend_is_active()) { gl_backend_init(); return; }
     while (!atomic_load(&ui_ready)) SDL_Delay(1);
     LOG("[vk] %s, swapchain %ux%u\n", g_vk.props.deviceName, g_vk.sc_extent.width, g_vk.sc_extent.height);
 }
 
 // ---- in-place reboot (runtime/main.c teardown; main thread, guest threads stopped)
 void backend_reset(void) {
+    if (gl_backend_is_active()) { gl_backend_reset(); return; }
     if (!g_vk.dev) return;
     rq_drain();  // (the render thread: everything queued ran; it idles while the game is down)
     rec_drain();  // (the recorder: everything the render thread queued is recorded and submitted)
@@ -1461,8 +1471,11 @@ void backend_reset(void) {
     g_last_presented = NULL;
     atomic_store_explicit(&g_first_frame_ready, false, memory_order_release);
 }
-void backend_guest_memory_reset(void) {}  // (exec.c re-imports the heap on first use)
+void backend_guest_memory_reset(void) {
+    if (gl_backend_is_active()) { gl_backend_guest_memory_reset(); return; }
+}  // (exec.c re-imports the heap on first use)
 void backend_clear_window(void) {
+    if (gl_backend_is_active()) { gl_backend_clear_window(); return; }
     if (rq_stopping()) return;
     rq_drain();
     static const float black[4] = {0, 0, 0, 1};
@@ -1470,6 +1483,7 @@ void backend_clear_window(void) {
 }
 
 int ui_run(void) {
+    if (gl_backend_is_active()) return gl_backend_run();
     ui_window_init();
     atomic_store(&ui_ready, true);
     extern bool rt_interactive_loading(void);

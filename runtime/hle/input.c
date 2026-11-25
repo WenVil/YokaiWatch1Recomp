@@ -23,7 +23,7 @@
 extern uint64_t renderer_present_count(void);
 extern bool menu_input_captured(void);  // runtime/ui/menu.mm: overlay menu or name entry up (it has the keys / pad)
 void input_refresh_bindings(void);
-static bool is_zelda_game(void) { const GameVersion *v = game_version(); return !v || strncmp(v->key, "v13_", 4) != 0; }
+static bool is_zelda_game(void) { const GameVersion *v = game_version(); return v && !strncmp(v->key, "v1_", 3); }
 static int32_t clamp_axis(int32_t v) { return v > 32767 ? 32767 : v < -32767 ? -32767 : v; }
 
 enum {

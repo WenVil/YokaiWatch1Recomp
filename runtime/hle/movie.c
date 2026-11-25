@@ -20,6 +20,7 @@
 
 #include "../hle.h"
 #include "../settings.h"
+#include "../gl/gl_backend.h"
 
 #define MOVIE_EOS 4u
 
@@ -405,6 +406,7 @@ HLE_FUNC("_ZN5movie6BufferC1ERKS0_", buf_copy) { *BUF(c->x[0]) = *BUF(c->x[1]); 
 HLE_FUNC("_ZN5movie6BufferaSERKS0_", buf_assign) { *BUF(c->x[0]) = *BUF(c->x[1]); }
 HLE_FUNC("_ZN5movie6BufferD1Ev", buf_dtor) { (void)c; }
 HLE_FUNC("_ZNK5movie6Buffer4BaseEv", buf_base) { c->x[0] = BUF(c->x[0])->base; }
+HLE_FUNC("_ZNK5movie6Buffer4DataEv", buf_data) { c->x[0] = BUF(c->x[0])->base; }
 HLE_FUNC("_ZNK5movie6Buffer4SizeEv", buf_size) { c->x[0] = (uint32_t)BUF(c->x[0])->size; }
 HLE_FUNC("_ZNK5movie6Buffer6OffsetEv", buf_offset) { c->x[0] = (uint32_t)BUF(c->x[0])->offset; }
 HLE_FUNC("_ZNK5movie6Buffer8CapacityEv", buf_capacity) { c->x[0] = BUF(c->x[0])->capacity; }
@@ -1023,7 +1025,24 @@ static void dec_get_output_buffer(Cpu *c) {
     int i = (int)c->x[1];
     MBuffer *b = BUF(c->x[2]);
     if (i < 0 || i >= NOUT) { c->x[0] = 1; return; }
+    {
+        static int logged_mode;
+        if (logged_mode < 4) {
+            logged_mode++;
+            LOG("[movie] GetOutputBuffer(video=%d, base=%#llx, cap=%llu)\n", d->video ? 1 : 0,
+                (unsigned long long)b->base, (unsigned long long)b->capacity);
+        }
+    }
     if (d->video && b->base && b->capacity == 8) {
+        if (gl_backend_is_active()) {
+            static bool warned_gl_tex;
+            if (!warned_gl_tex) {
+                warned_gl_tex = true;
+                LOG("[movie] GL backend active: skipping NVN texture upload in Decoder::GetOutputBuffer\n");
+            }
+            c->x[0] = 0;
+            return;
+        }
         // texture output mode: the buffer points at the game's NVNtexture; write RGBA into it
         NvnTexture *t = *(NvnTexture **)(uintptr_t)b->base;
         int w = d->width, h = d->height;
