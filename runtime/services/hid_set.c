@@ -1,4 +1,5 @@
 // hid (shared memory, input state filled in later) and settings (set, set:sys).
+#include <pthread.h>
 #include <string.h>
 
 #include "../hle.h"
@@ -15,12 +16,94 @@ static uint32_t new_event_handle(void) {
 // ------------------------------------------------------------------ hid
 KSharedMem *g_hid_shmem;
 static uint32_t hid_shmem_handle;
-RT_ON_RESET(hid_reset) { g_hid_shmem = NULL; hid_shmem_handle = 0; }
+static pthread_mutex_t hid_touch_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t touch_sampling;
+static uint64_t touch_slot_tail;
+static bool touch_was_down;
+static int32_t touch_last_x, touch_last_y;
+
+// RingLifo<TouchScreenState<16>, 16> at g_hid_shmem + 0x400 (verified against YW1 sdk 0x34ab38 / 0x34b370).
+// Header: +0x00 timestamp, +0x08 buffer_count(17), +0x10 tail, +0x18 count.
+// Slot i at +0x20 + i*0x298: +0x00 seqlock, +0x08 sampling, +0x10 count, +0x18 touches[0..15] (stride 0x28).
+static void push_touch_sample_locked(uint8_t *base, int32_t count, uint32_t attrs, int32_t x, int32_t y) {
+    uint64_t next_tail = (touch_sampling == 0) ? 0 : ((touch_slot_tail + 1) % 17);
+    uint64_t samp = ++touch_sampling;
+    uint8_t *entry = base + 0x20 + next_tail * 0x298;
+    memset(entry, 0, 0x298);
+    __atomic_store_n((uint64_t *)(entry + 0x00), samp * 2 - 1, __ATOMIC_RELEASE);
+    *(int64_t *)(entry + 0x08) = (int64_t)samp;
+    *(int32_t *)(entry + 0x10) = count;
+    if (count > 0) {
+        uint8_t *t = entry + 0x18;
+        *(uint64_t *)(t + 0x00) = 0;      // delta_time
+        *(uint32_t *)(t + 0x08) = attrs;  // Switch attributes: bit0=Start, bit1=End
+        *(uint32_t *)(t + 0x0C) = 0;      // finger_id
+        *(int32_t *)(t + 0x10) = x;       // 0..1279
+        *(int32_t *)(t + 0x14) = y;       // 0..719
+        *(int32_t *)(t + 0x18) = 10;      // diameter_x
+        *(int32_t *)(t + 0x1C) = 10;      // diameter_y
+        *(int32_t *)(t + 0x20) = 0;       // rotation_angle
+    }
+    __atomic_store_n((uint64_t *)(entry + 0x00), samp * 2, __ATOMIC_RELEASE);
+    __atomic_store_n((uint64_t *)(base + 0x10), next_tail, __ATOMIC_RELEASE);
+    uint64_t valid = samp < 17 ? samp : 17;
+    __atomic_store_n((uint64_t *)(base + 0x18), valid, __ATOMIC_RELEASE);
+    touch_slot_tail = next_tail;
+}
+
+static void hid_shmem_map(KSharedMem *s) {
+    pthread_mutex_lock(&hid_touch_lock);
+    uint8_t *base = (uint8_t *)(uintptr_t)(s->guest_addr + 0x400);
+    *(uint64_t *)(base + 0x00) = 0;
+    *(uint64_t *)(base + 0x08) = 17;
+    *(uint64_t *)(base + 0x10) = 0;
+    *(uint64_t *)(base + 0x18) = 0;
+    touch_sampling = 0;
+    touch_slot_tail = 0;
+    touch_was_down = false;
+    push_touch_sample_locked(base, 0, 0, 0, 0);
+    pthread_mutex_unlock(&hid_touch_lock);
+    LOG("[hid] shared memory mapped at %llx (TouchScreen RingLifo @ +0x400)\n",
+        (unsigned long long)s->guest_addr);
+}
+
+void hid_touch_write(bool down, int x, int y) {
+    if (x < 0) x = 0; else if (x > 1279) x = 1279;
+    if (y < 0) y = 0; else if (y > 719) y = 719;
+    pthread_mutex_lock(&hid_touch_lock);
+    if (g_hid_shmem && g_hid_shmem->guest_addr) {
+        uint8_t *base = (uint8_t *)(uintptr_t)(g_hid_shmem->guest_addr + 0x400);
+        if (down) {
+            uint32_t attrs = touch_was_down ? 0u : 1u;
+            push_touch_sample_locked(base, 1, attrs, x, y);
+            if (!touch_was_down) LOG("[hid] touch down (%d, %d)\n", x, y);
+            touch_was_down = true;
+            touch_last_x = x;
+            touch_last_y = y;
+        } else if (touch_was_down) {
+            push_touch_sample_locked(base, 1, 2u, touch_last_x, touch_last_y);
+            push_touch_sample_locked(base, 0, 0, 0, 0);
+            LOG("[hid] touch up (%d, %d)\n", touch_last_x, touch_last_y);
+            touch_was_down = false;
+        }
+    }
+    pthread_mutex_unlock(&hid_touch_lock);
+}
+
+RT_ON_RESET(hid_reset) {
+    pthread_mutex_lock(&hid_touch_lock);
+    g_hid_shmem = NULL;
+    hid_shmem_handle = 0;
+    touch_sampling = 0;
+    touch_slot_tail = 0;
+    touch_was_down = false;
+    pthread_mutex_unlock(&hid_touch_lock);
+}
 
 static void applet_resource(Service *s, IpcReq *req, IpcResp *resp) {
     (void)s;
     if (req->cmd == 0) {  // GetSharedMemoryHandle
-        if (!g_hid_shmem) g_hid_shmem = kernel_create_shared_memory(0x40000, NULL, &hid_shmem_handle);
+        if (!g_hid_shmem) g_hid_shmem = kernel_create_shared_memory(0x40000, hid_shmem_map, &hid_shmem_handle);
         resp->copy_handles[resp->ncopy++] = hid_shmem_handle;
     }
 }

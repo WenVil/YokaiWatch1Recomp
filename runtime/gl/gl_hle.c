@@ -42,6 +42,60 @@
 #ifndef GL_PACK_ALIGNMENT
 #define GL_PACK_ALIGNMENT 0x0D05
 #endif
+#ifndef GL_FRAMEBUFFER
+#define GL_FRAMEBUFFER 0x8D40
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
+#ifndef GL_FRAMEBUFFER_BINDING
+#define GL_FRAMEBUFFER_BINDING 0x8CA6
+#endif
+#ifndef GL_RENDERBUFFER
+#define GL_RENDERBUFFER 0x8D41
+#endif
+#ifndef GL_RENDERBUFFER_BINDING
+#define GL_RENDERBUFFER_BINDING 0x8CA7
+#endif
+#ifndef GL_COLOR_ATTACHMENT0
+#define GL_COLOR_ATTACHMENT0 0x8CE0
+#endif
+#ifndef GL_DEPTH_STENCIL_ATTACHMENT
+#define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
+#endif
+#ifndef GL_DEPTH24_STENCIL8
+#define GL_DEPTH24_STENCIL8 0x88F0
+#endif
+#ifndef GL_FRAMEBUFFER_COMPLETE
+#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#endif
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#ifndef GL_BACK_LEFT
+#define GL_BACK_LEFT 0x0402
+#endif
+#ifndef GL_SCISSOR_TEST
+#define GL_SCISSOR_TEST 0x0C11
+#endif
+#ifndef GL_COLOR_CLEAR_VALUE
+#define GL_COLOR_CLEAR_VALUE 0x0C22
+#endif
+#ifndef GL_COLOR_WRITEMASK
+#define GL_COLOR_WRITEMASK 0x0C23
+#endif
+#ifndef GL_READ_BUFFER
+#define GL_READ_BUFFER 0x0C02
+#endif
+#ifndef GL_VIEWPORT
+#define GL_VIEWPORT 0x0BA2
+#endif
+#ifndef GL_TEXTURE_BINDING_2D
+#define GL_TEXTURE_BINDING_2D 0x8069
+#endif
+
+#define VFBO_W 1920
+#define VFBO_H 1080
 #ifndef GL_BGR_EXT
 #define GL_BGR_EXT 0x80E0
 #endif
@@ -159,7 +213,11 @@ typedef void(APIENTRY *PFN_glGetShaderInfoLog)(GLuint, GLsizei, GLsizei *, GLcha
 typedef void(APIENTRY *PFN_glGetProgramInfoLog)(GLuint, GLsizei, GLsizei *, GLchar *);
 typedef void(APIENTRY *PFN_glGetFloatv)(GLenum, GLfloat *);
 typedef void(APIENTRY *PFN_glPixelStorei)(GLenum, GLint);
+typedef void(APIENTRY *PFN_glDrawBuffer)(GLenum);
 typedef void(APIENTRY *PFN_glReadBuffer)(GLenum);
+typedef GLenum(APIENTRY *PFN_glCheckFramebufferStatus)(GLenum);
+typedef void(APIENTRY *PFN_glBlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
+typedef GLboolean(APIENTRY *PFN_glIsEnabled)(GLenum);
 
 #define GL_ALL_PROCS(X) \
     X(glActiveTexture) \
@@ -263,7 +321,11 @@ typedef void(APIENTRY *PFN_glReadBuffer)(GLenum);
     X(glGetProgramInfoLog) \
     X(glGetFloatv) \
     X(glPixelStorei) \
-    X(glReadBuffer)
+    X(glDrawBuffer) \
+    X(glReadBuffer) \
+    X(glCheckFramebufferStatus) \
+    X(glBlitFramebuffer) \
+    X(glIsEnabled)
 
 static struct {
 #define X(name) PFN_##name p_##name;
@@ -297,6 +359,30 @@ static struct {
 } g_comp_fmts[32];
 static int g_ncomp_fmts;
 
+// Virtual 1080p default framebuffer & guest FBO=0 tracking
+static GLuint g_virtual_fbo;
+static GLuint g_vfbo_color;
+static GLuint g_vfbo_depth;
+static GLuint g_guest_draw_fbo;
+static GLuint g_guest_read_fbo;
+
+// Letterbox rect on host window for touch coordinate conversion
+static int g_vp_x = 0, g_vp_y = 0, g_vp_w = 1280, g_vp_h = 720, g_win_w = 1280, g_win_h = 720;
+
+// Lifetime glGetError telemetry
+static struct {
+    GLenum code;
+    uint64_t count;
+    uint64_t first_frame;
+    uint64_t last_frame;
+} g_gl_err_stats[16];
+static int g_gl_err_kind_n;
+static uint64_t g_gl_err_total;
+
+// eglGetProcAddress telemetry
+static uint32_t g_epa_hits;
+static uint32_t g_epa_misses;
+
 RT_ON_RESET(gl_hle_reset) {
     pthread_mutex_lock(&g_gl_lock);
     g_str_cache_n = 0;
@@ -305,6 +391,12 @@ RT_ON_RESET(gl_hle_reset) {
     g_shader_ok = g_shader_fail = g_prog_ok = g_prog_fail = g_shader_src_logs = 0;
     g_ncomp_fmts = 0;
     memset(g_comp_fmts, 0, sizeof g_comp_fmts);
+    g_virtual_fbo = g_vfbo_color = g_vfbo_depth = 0;
+    g_guest_draw_fbo = g_guest_read_fbo = 0;
+    memset(g_gl_err_stats, 0, sizeof g_gl_err_stats);
+    g_gl_err_kind_n = 0;
+    g_gl_err_total = 0;
+    g_epa_hits = g_epa_misses = 0;
     pthread_mutex_unlock(&g_gl_lock);
 }
 
@@ -325,26 +417,197 @@ void gl_hle_init_procs(void) {
     pthread_mutex_unlock(&g_gl_lock);
 }
 
+void gl_hle_ensure_virtual_fbo(void) {
+    if (g_virtual_fbo != 0) {
+        if (g_gl.p_glBindFramebuffer) g_gl.p_glBindFramebuffer(GL_FRAMEBUFFER, g_virtual_fbo);
+        return;
+    }
+    if (!g_gl.p_glGenFramebuffers || !g_gl.p_glBindFramebuffer || !g_gl.p_glGenTextures ||
+        !g_gl.p_glBindTexture || !g_gl.p_glTexImage2D || !g_gl.p_glTexParameteri ||
+        !g_gl.p_glFramebufferTexture2D || !g_gl.p_glGenRenderbuffers ||
+        !g_gl.p_glBindRenderbuffer || !g_gl.p_glRenderbufferStorage ||
+        !g_gl.p_glFramebufferRenderbuffer || !g_gl.p_glCheckFramebufferStatus) {
+        LOG("[gl] ERROR: missing GL procs needed for virtual 1080p FBO\n");
+        return;
+    }
+
+    GLint prev_tex = 0, prev_rbo = 0;
+    if (g_gl.p_glGetIntegerv) {
+        g_gl.p_glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
+        g_gl.p_glGetIntegerv(GL_RENDERBUFFER_BINDING, &prev_rbo);
+    }
+
+    g_gl.p_glGenTextures(1, &g_vfbo_color);
+    g_gl.p_glBindTexture(GL_TEXTURE_2D, g_vfbo_color);
+    g_gl.p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, VFBO_W, VFBO_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    g_gl.p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    g_gl.p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    g_gl.p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    g_gl.p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    g_gl.p_glGenRenderbuffers(1, &g_vfbo_depth);
+    g_gl.p_glBindRenderbuffer(GL_RENDERBUFFER, g_vfbo_depth);
+    g_gl.p_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, VFBO_W, VFBO_H);
+
+    g_gl.p_glGenFramebuffers(1, &g_virtual_fbo);
+    g_gl.p_glBindFramebuffer(GL_FRAMEBUFFER, g_virtual_fbo);
+    g_gl.p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_vfbo_color, 0);
+    g_gl.p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g_vfbo_depth);
+
+    GLenum status = g_gl.p_glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        LOG("[gl] ERROR: virtual %dx%d FBO incomplete (status=0x%04x)\n", VFBO_W, VFBO_H, (unsigned)status);
+    } else {
+        LOG("[gl] virtual %dx%d default FBO #%u ready (color_tex=%u RGBA8 GL_LINEAR, ds_rbo=%u D24S8)\n",
+            VFBO_W, VFBO_H, g_virtual_fbo, g_vfbo_color, g_vfbo_depth);
+    }
+
+    g_gl.p_glBindTexture(GL_TEXTURE_2D, (GLuint)prev_tex);
+    g_gl.p_glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)prev_rbo);
+    if (g_gl.p_glViewport) g_gl.p_glViewport(0, 0, VFBO_W, VFBO_H);
+    g_guest_draw_fbo = 0;
+    g_guest_read_fbo = 0;
+}
+
+void gl_hle_blit_virtual_fbo(int win_w, int win_h) {
+    if (!g_virtual_fbo || win_w <= 0 || win_h <= 0 || !g_gl.p_glBlitFramebuffer ||
+        !g_gl.p_glBindFramebuffer || !g_gl.p_glGetIntegerv) {
+        return;
+    }
+
+    int dst_w = win_w;
+    int dst_h = (win_w * VFBO_H + VFBO_W / 2) / VFBO_W;
+    if (dst_h > win_h) {
+        dst_h = win_h;
+        dst_w = (win_h * VFBO_W + VFBO_H / 2) / VFBO_H;
+    }
+    int dst_x = (win_w - dst_w) / 2;
+    int dst_y = (win_h - dst_h) / 2;
+
+    pthread_mutex_lock(&g_gl_lock);
+    g_vp_x = dst_x;
+    g_vp_y = dst_y;
+    g_vp_w = dst_w;
+    g_vp_h = dst_h;
+    g_win_w = win_w;
+    g_win_h = win_h;
+    pthread_mutex_unlock(&g_gl_lock);
+
+    GLint prev_read_fbo = 0, prev_draw_fbo = 0, prev_read_buf = GL_COLOR_ATTACHMENT0;
+    GLint prev_vp[4] = {0, 0, VFBO_W, VFBO_H};
+    GLfloat prev_clear[4] = {0, 0, 0, 0};
+    GLboolean prev_cmask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+    GLboolean prev_scissor = g_gl.p_glIsEnabled ? g_gl.p_glIsEnabled(GL_SCISSOR_TEST) : GL_FALSE;
+
+    g_gl.p_glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
+    g_gl.p_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_draw_fbo);
+    g_gl.p_glGetIntegerv(GL_READ_BUFFER, &prev_read_buf);
+    g_gl.p_glGetIntegerv(GL_VIEWPORT, prev_vp);
+    if (g_gl.p_glGetFloatv) g_gl.p_glGetFloatv(GL_COLOR_CLEAR_VALUE, prev_clear);
+    if (g_gl.p_glGetBooleanv) g_gl.p_glGetBooleanv(GL_COLOR_WRITEMASK, prev_cmask);
+
+    if (prev_scissor && g_gl.p_glDisable) g_gl.p_glDisable(GL_SCISSOR_TEST);
+    g_gl.p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g_virtual_fbo);
+    g_gl.p_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    if (g_gl.p_glReadBuffer) g_gl.p_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    if (g_gl.p_glDrawBuffer) g_gl.p_glDrawBuffer(GL_BACK);
+    if (g_gl.p_glColorMask) g_gl.p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    if (g_gl.p_glViewport) g_gl.p_glViewport(0, 0, win_w, win_h);
+    if (g_gl.p_glClearColor && g_gl.p_glClear) {
+        g_gl.p_glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        g_gl.p_glClear(GL_COLOR_BUFFER_BIT);
+    }
+    g_gl.p_glBlitFramebuffer(0, 0, VFBO_W, VFBO_H,
+                             dst_x, dst_y, dst_x + dst_w, dst_y + dst_h,
+                             GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+    if (g_gl.p_glClearColor) g_gl.p_glClearColor(prev_clear[0], prev_clear[1], prev_clear[2], prev_clear[3]);
+    if (g_gl.p_glColorMask) g_gl.p_glColorMask(prev_cmask[0], prev_cmask[1], prev_cmask[2], prev_cmask[3]);
+    if (g_gl.p_glViewport) g_gl.p_glViewport(prev_vp[0], prev_vp[1], prev_vp[2], prev_vp[3]);
+    g_gl.p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g_virtual_fbo);
+    if (g_gl.p_glReadBuffer) g_gl.p_glReadBuffer((GLenum)prev_read_buf);
+    g_gl.p_glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
+    g_gl.p_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw_fbo);
+    if (prev_scissor && g_gl.p_glEnable) g_gl.p_glEnable(GL_SCISSOR_TEST);
+}
+
+void gl_hle_get_viewport_rect(int *vx, int *vy, int *vw, int *vh, int *ww, int *wh) {
+    pthread_mutex_lock(&g_gl_lock);
+    if (vx) *vx = g_vp_x;
+    if (vy) *vy = g_vp_y;
+    if (vw) *vw = g_vp_w;
+    if (vh) *vh = g_vp_h;
+    if (ww) *ww = g_win_w;
+    if (wh) *wh = g_win_h;
+    pthread_mutex_unlock(&g_gl_lock);
+}
+
 void gl_hle_check_post_swap_errors(uint64_t frame_num) {
     if (!g_gl.p_glGetError) return;
     for (int i = 0; i < 8; i++) {
         GLenum err = g_gl.p_glGetError();
         if (err == GL_NO_ERROR) break;
-        LOG("[gl] frame %llu glGetError() = 0x%04x\n", (unsigned long long)frame_num, (unsigned)err);
+        pthread_mutex_lock(&g_gl_lock);
+        g_gl_err_total++;
+        int idx = -1;
+        for (int j = 0; j < g_gl_err_kind_n; j++) {
+            if (g_gl_err_stats[j].code == err) { idx = j; break; }
+        }
+        if (idx < 0 && g_gl_err_kind_n < 16) {
+            idx = g_gl_err_kind_n++;
+            g_gl_err_stats[idx].code = err;
+            g_gl_err_stats[idx].first_frame = frame_num;
+        }
+        uint64_t occ = 0;
+        if (idx >= 0) {
+            g_gl_err_stats[idx].count++;
+            g_gl_err_stats[idx].last_frame = frame_num;
+            occ = g_gl_err_stats[idx].count;
+        }
+        pthread_mutex_unlock(&g_gl_lock);
+        if (occ <= 5) {
+            LOG("[gl] frame %llu glGetError() = 0x%04x (occ=%llu)\n",
+                (unsigned long long)frame_num, (unsigned)err, (unsigned long long)occ);
+        }
     }
 }
 
-void gl_hle_read_backbuffer_rgb(int w, int h, uint8_t *bgr_out) {
+void gl_hle_read_virtual_fbo_rgb(int w, int h, uint8_t *bgr_out) {
     if (!g_gl.p_glReadPixels || !g_gl.p_glGetIntegerv || !g_gl.p_glPixelStorei) return;
-    GLint prev_read_fbo = 0, prev_pack = 4;
+    GLuint target_fbo = g_virtual_fbo ? g_virtual_fbo : 0;
+    GLint prev_read_fbo = 0, prev_pack = 4, prev_read_buf = GL_COLOR_ATTACHMENT0;
     g_gl.p_glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
     g_gl.p_glGetIntegerv(GL_PACK_ALIGNMENT, &prev_pack);
-    if (g_gl.p_glBindFramebuffer && prev_read_fbo != 0) g_gl.p_glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    if (g_gl.p_glReadBuffer) g_gl.p_glReadBuffer(GL_BACK);
+    g_gl.p_glGetIntegerv(GL_READ_BUFFER, &prev_read_buf);
+    if (g_gl.p_glBindFramebuffer) g_gl.p_glBindFramebuffer(GL_READ_FRAMEBUFFER, target_fbo);
+    if (g_gl.p_glReadBuffer) g_gl.p_glReadBuffer(target_fbo ? GL_COLOR_ATTACHMENT0 : GL_BACK);
     g_gl.p_glPixelStorei(GL_PACK_ALIGNMENT, 4);
     g_gl.p_glReadPixels(0, 0, w, h, GL_BGR_EXT, GL_UNSIGNED_BYTE, bgr_out);
     g_gl.p_glPixelStorei(GL_PACK_ALIGNMENT, prev_pack);
-    if (g_gl.p_glBindFramebuffer && prev_read_fbo != 0) g_gl.p_glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
+    if (g_gl.p_glReadBuffer) g_gl.p_glReadBuffer((GLenum)prev_read_buf);
+    if (g_gl.p_glBindFramebuffer) g_gl.p_glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
+}
+
+void gl_hle_read_backbuffer_rgb(int w, int h, uint8_t *bgr_out) {
+    gl_hle_read_virtual_fbo_rgb(w, h, bgr_out);
+}
+
+void gl_hle_log_summary(void) {
+    pthread_mutex_lock(&g_gl_lock);
+    LOG("[gl] SUMMARY: shaders(ok=%d fail=%d) programs(ok=%d fail=%d) epa(hits=%u misses=%u) glErrors=%llu\n",
+        g_shader_ok, g_shader_fail, g_prog_ok, g_prog_fail,
+        g_epa_hits, g_epa_misses, (unsigned long long)g_gl_err_total);
+    for (int i = 0; i < g_ncomp_fmts; i++) {
+        LOG("[gl] SUMMARY compressed fmt=0x%04x count=%u\n",
+            (unsigned)g_comp_fmts[i].fmt, g_comp_fmts[i].count);
+    }
+    for (int i = 0; i < g_gl_err_kind_n; i++) {
+        LOG("[gl] SUMMARY glError 0x%04x count=%llu frames=[%llu..%llu]\n",
+            (unsigned)g_gl_err_stats[i].code, (unsigned long long)g_gl_err_stats[i].count,
+            (unsigned long long)g_gl_err_stats[i].first_frame,
+            (unsigned long long)g_gl_err_stats[i].last_frame);
+    }
+    pthread_mutex_unlock(&g_gl_lock);
 }
 
 // ---- AAPCS64 argument accessors
@@ -361,7 +624,14 @@ void gl_hle_read_backbuffer_rgb(int w, int h, uint8_t *bgr_out) {
 static void hle_glActiveTexture(Cpu *c) { g_gl.p_glActiveTexture(U32(0)); }
 static void hle_glAttachShader(Cpu *c) { g_gl.p_glAttachShader(U32(0), U32(1)); }
 static void hle_glBindBuffer(Cpu *c) { g_gl.p_glBindBuffer(U32(0), U32(1)); }
-static void hle_glBindFramebuffer(Cpu *c) { g_gl.p_glBindFramebuffer(U32(0), U32(1)); }
+static void hle_glBindFramebuffer(Cpu *c) {
+    GLenum target = U32(0);
+    GLuint fb = U32(1);
+    if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) g_guest_draw_fbo = fb;
+    if (target == GL_FRAMEBUFFER || target == GL_READ_FRAMEBUFFER) g_guest_read_fbo = fb;
+    GLuint real_fb = (fb == 0 && g_virtual_fbo != 0) ? g_virtual_fbo : fb;
+    g_gl.p_glBindFramebuffer(target, real_fb);
+}
 static void hle_glBindRenderbuffer(Cpu *c) { g_gl.p_glBindRenderbuffer(U32(0), U32(1)); }
 static void hle_glBindTexture(Cpu *c) { g_gl.p_glBindTexture(U32(0), U32(1)); }
 static void hle_glBlendEquationSeparate(Cpu *c) { g_gl.p_glBlendEquationSeparate(U32(0), U32(1)); }
@@ -537,7 +807,31 @@ static void hle_glCreateProgram(Cpu *c) { c->x[0] = (uint64_t)g_gl.p_glCreatePro
 static void hle_glCreateShader(Cpu *c) { c->x[0] = (uint64_t)g_gl.p_glCreateShader(U32(0)); }
 static void hle_glCullFace(Cpu *c) { g_gl.p_glCullFace(U32(0)); }
 static void hle_glDeleteBuffers(Cpu *c) { g_gl.p_glDeleteBuffers(I32(0), (const GLuint *)CPTR(1)); }
-static void hle_glDeleteFramebuffers(Cpu *c) { g_gl.p_glDeleteFramebuffers(I32(0), (const GLuint *)CPTR(1)); }
+static GLenum rewrite_default_fbo_buf(GLenum buf, bool is_draw) {
+    if (g_virtual_fbo != 0 && (is_draw ? (g_guest_draw_fbo == 0) : (g_guest_read_fbo == 0))) {
+        if (buf == GL_BACK || buf == GL_BACK_LEFT) return GL_COLOR_ATTACHMENT0;
+    }
+    return buf;
+}
+
+static void hle_glDeleteFramebuffers(Cpu *c) {
+    GLsizei n = I32(0);
+    const GLuint *fbs = (const GLuint *)CPTR(1);
+    g_gl.p_glDeleteFramebuffers(n, fbs);
+    if (fbs && n > 0 && g_virtual_fbo != 0) {
+        for (GLsizei i = 0; i < n; i++) {
+            if (fbs[i] == 0) continue;
+            if (fbs[i] == g_guest_draw_fbo) {
+                g_guest_draw_fbo = 0;
+                g_gl.p_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_virtual_fbo);
+            }
+            if (fbs[i] == g_guest_read_fbo) {
+                g_guest_read_fbo = 0;
+                g_gl.p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g_virtual_fbo);
+            }
+        }
+    }
+}
 static void hle_glDeleteProgram(Cpu *c) { g_gl.p_glDeleteProgram(U32(0)); }
 static void hle_glDeleteRenderbuffers(Cpu *c) { g_gl.p_glDeleteRenderbuffers(I32(0), (const GLuint *)CPTR(1)); }
 static void hle_glDeleteShader(Cpu *c) { g_gl.p_glDeleteShader(U32(0)); }
@@ -547,7 +841,24 @@ static void hle_glDepthMask(Cpu *c) { g_gl.p_glDepthMask(U8(0)); }
 static void hle_glDisable(Cpu *c) { g_gl.p_glDisable(U32(0)); }
 static void hle_glDisableVertexAttribArray(Cpu *c) { g_gl.p_glDisableVertexAttribArray(U32(0)); }
 static void hle_glDrawArrays(Cpu *c) { g_gl.p_glDrawArrays(U32(0), I32(1), I32(2)); }
-static void hle_glDrawBuffers(Cpu *c) { g_gl.p_glDrawBuffers(I32(0), (const GLenum *)CPTR(1)); }
+static void hle_glDrawBuffer(Cpu *c) {
+    if (g_gl.p_glDrawBuffer) g_gl.p_glDrawBuffer(rewrite_default_fbo_buf(U32(0), true));
+}
+static void hle_glDrawBuffers(Cpu *c) {
+    GLsizei n = I32(0);
+    const GLenum *bufs = (const GLenum *)CPTR(1);
+    if (bufs && n > 0 && n <= 16 && g_guest_draw_fbo == 0 && g_virtual_fbo != 0) {
+        GLenum mapped[16];
+        bool changed = false;
+        for (GLsizei i = 0; i < n; i++) {
+            mapped[i] = rewrite_default_fbo_buf(bufs[i], true);
+            if (mapped[i] != bufs[i]) changed = true;
+        }
+        g_gl.p_glDrawBuffers(n, changed ? mapped : bufs);
+        return;
+    }
+    g_gl.p_glDrawBuffers(n, bufs);
+}
 static void hle_glDrawElements(Cpu *c) { g_gl.p_glDrawElements(U32(0), I32(1), U32(2), CPTR(3)); }
 static void hle_glEnable(Cpu *c) { g_gl.p_glEnable(U32(0)); }
 static void hle_glEnableVertexAttribArray(Cpu *c) { g_gl.p_glEnableVertexAttribArray(U32(0)); }
@@ -569,7 +880,16 @@ static void hle_glGetAttribLocation(Cpu *c) {
     c->x[0] = (uint64_t)(uint32_t)g_gl.p_glGetAttribLocation(U32(0), (const GLchar *)CPTR(1));
 }
 static void hle_glGetBooleanv(Cpu *c) { g_gl.p_glGetBooleanv(U32(0), (GLboolean *)PTR(1)); }
-static void hle_glGetIntegerv(Cpu *c) { g_gl.p_glGetIntegerv(U32(0), (GLint *)PTR(1)); }
+static void hle_glGetIntegerv(Cpu *c) {
+    GLenum pname = U32(0);
+    GLint *data = (GLint *)PTR(1);
+    g_gl.p_glGetIntegerv(pname, data);
+    if (data && g_virtual_fbo != 0 &&
+        (pname == GL_FRAMEBUFFER_BINDING || pname == GL_READ_FRAMEBUFFER_BINDING) &&
+        (GLuint)*data == g_virtual_fbo) {
+        *data = 0;
+    }
+}
 static void hle_glGetProgramiv(Cpu *c) { g_gl.p_glGetProgramiv(U32(0), U32(1), (GLint *)PTR(2)); }
 static void hle_glGetShaderPrecisionFormat(Cpu *c) {
     GLenum stype = U32(0), ptype = U32(1);
@@ -636,6 +956,9 @@ static void hle_glLinkProgram(Cpu *c) {
 }
 
 static void hle_glPolygonOffset(Cpu *c) { g_gl.p_glPolygonOffset(F32(0), F32(1)); }
+static void hle_glReadBuffer(Cpu *c) {
+    if (g_gl.p_glReadBuffer) g_gl.p_glReadBuffer(rewrite_default_fbo_buf(U32(0), false));
+}
 static void hle_glReadPixels(Cpu *c) { g_gl.p_glReadPixels(I32(0), I32(1), I32(2), I32(3), U32(4), U32(5), PTR(6)); }
 static void hle_glRenderbufferStorage(Cpu *c) { g_gl.p_glRenderbufferStorage(U32(0), U32(1), I32(2), I32(3)); }
 static void hle_glScissor(Cpu *c) { g_gl.p_glScissor(I32(0), I32(1), I32(2), I32(3)); }
@@ -748,6 +1071,7 @@ static const GlEntry g_gl_entries[] = {
     GL_ENT(glDisable),
     GL_ENT(glDisableVertexAttribArray),
     GL_ENT(glDrawArrays),
+    GL_ENT(glDrawBuffer),
     GL_ENT(glDrawBuffers),
     GL_ENT(glDrawElements),
     GL_ENT(glEnable),
@@ -779,6 +1103,7 @@ static const GlEntry g_gl_entries[] = {
     GL_ENT(glLinkProgram),
     GL_ENT(glPixelStorei),
     GL_ENT(glPolygonOffset),
+    GL_ENT(glReadBuffer),
     GL_ENT(glReadPixels),
     GL_ENT(glRenderbufferStorage),
     GL_ENT(glScissor),
@@ -828,10 +1153,15 @@ uint64_t gl_hle_lookup_trampoline(const char *name) {
             if (!*e->proc_ptr) {
                 LOG("[gl] WARN: host OpenGL driver does not expose %s%s\n",
                     name, e->has_fallback ? " (using HLE fallback)" : " (returning NULL)");
-                if (!e->has_fallback) return 0;
+                if (!e->has_fallback) {
+                    __atomic_add_fetch(&g_epa_misses, 1, __ATOMIC_RELAXED);
+                    return 0;
+                }
             }
         }
+        __atomic_add_fetch(&g_epa_hits, 1, __ATOMIC_RELAXED);
         return hle_register(e->name, e->fn);
     }
+    __atomic_add_fetch(&g_epa_misses, 1, __ATOMIC_RELAXED);
     return 0;
 }

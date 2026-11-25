@@ -56,16 +56,14 @@ static bool frame_should_dump(uint64_t frame) {
 
 static void dump_frame_bmp(uint64_t frame) {
     if (!s_window) return;
-    int pw = 0, ph = 0;
-    SDL_GetWindowSizeInPixels(s_window, &pw, &ph);
-    if (pw <= 0 || ph <= 0) return;
+    int pw = 1920, ph = 1080;
 
     int row_stride = (pw * 3 + 3) & ~3;
     size_t img_bytes = (size_t)row_stride * (size_t)ph;
     uint8_t *bgr = malloc(img_bytes);
     if (!bgr) return;
     memset(bgr, 0, img_bytes);
-    gl_hle_read_backbuffer_rgb(pw, ph, bgr);
+    gl_hle_read_virtual_fbo_rgb(pw, ph, bgr);
 
     const char *dir = getenv("YW1_DUMP_DIR");
     if (!dir || !*dir) dir = "F:/decode-monsterwatch/work/screenshots";
@@ -164,6 +162,7 @@ void gl_backend_clear_window(void) {}
 void gl_backend_quit(void) {
     if (atomic_flag_test_and_set(&s_quit_once)) return;
     atomic_store_explicit(&s_quitting, true, memory_order_release);
+    gl_hle_log_summary();
 }
 
 SDL_Window *gl_backend_window(void) { return s_window; }
@@ -205,6 +204,7 @@ bool gl_backend_make_current(bool make_null) {
     }
     SDL_GL_SetSwapInterval(s_swap_interval);
     gl_hle_init_procs();
+    gl_hle_ensure_virtual_fbo();
     return true;
 }
 
@@ -219,9 +219,15 @@ void gl_backend_swap_buffers(void) {
     if (frame <= 10 || frame % 60 == 0) {
         LOG("[gl] eglSwapBuffers frame=%llu\n", (unsigned long long)frame);
     }
+    gl_hle_check_post_swap_errors(frame);
+    if (frame == 10 || frame % 120 == 0) gl_hle_log_summary();
     if (frame_should_dump(frame)) dump_frame_bmp(frame);
-    if (frame <= 10) gl_hle_check_post_swap_errors(frame);
+    int pw = 0, ph = 0;
+    SDL_GetWindowSizeInPixels(s_window, &pw, &ph);
+    gl_hle_blit_virtual_fbo(pw, ph);
     SDL_GL_SwapWindow(s_window);
+    extern void input_frame(uint64_t frame);
+    input_frame(frame);
 }
 
 int gl_backend_run(void) {

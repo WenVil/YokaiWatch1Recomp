@@ -19,8 +19,10 @@
 #include "../rumble.h"
 #include "../led.h"
 #include "../ui/menu.h"
+#include "../gl/gl_backend.h"
 
 extern uint64_t renderer_present_count(void);
+extern void hid_touch_write(bool down, int x, int y);
 extern bool menu_input_captured(void);  // runtime/ui/menu.mm: overlay menu or name entry up (it has the keys / pad)
 void input_refresh_bindings(void);
 static bool is_zelda_game(void) { const GameVersion *v = game_version(); return v && !strncmp(v->key, "v1_", 3); }
@@ -346,7 +348,7 @@ bool input_user_blocked(const SDL_Event *e) {
     static int on = -1;
     if (on < 0) {
         const char *v = getenv("LARECOMP_NO_USER_INPUT");
-        on = v ? atoi(v) != 0 : (getenv("LARECOMP_INPUT") || getenv("LARECOMP_DOORJUMP_TEST") || getenv("LARECOMP_PLACE") ||
+        on = v ? atoi(v) != 0 : (getenv("LARECOMP_INPUT") || getenv("YW1_TEST_SCRIPT") || getenv("LARECOMP_DOORJUMP_TEST") || getenv("LARECOMP_PLACE") ||
                                  getenv("LARECOMP_HOST_INPUT") || getenv("LARECOMP_BIND_TEST"));
         if (on) LOG("[input] scripted run: keyboard, mouse and controllers ignored\n");
     }
@@ -513,6 +515,31 @@ static void apply_keyboard_update(void) {
     note_press(now & ~before, before & ~now);
 }
 
+static bool touch_mouse_down;
+
+static bool window_to_touch_coords(float wx, float wy, int *tx, int *ty) {
+    SDL_Window *win = gl_backend_window();
+    int pt_w = 0, pt_h = 0;
+    if (win) SDL_GetWindowSize(win, &pt_w, &pt_h);
+    int vx = 0, vy = 0, vw = 0, vh = 0, ww = 0, wh = 0;
+    gl_hle_get_viewport_rect(&vx, &vy, &vw, &vh, &ww, &wh);
+    if (pt_w <= 0 || pt_h <= 0 || vw <= 0 || vh <= 0 || ww <= 0 || wh <= 0) {
+        *tx = 640; *ty = 360;
+        return false;
+    }
+    double px = (double)wx * ((double)ww / (double)pt_w);
+    double py_top = (double)wy * ((double)wh / (double)pt_h);
+    double top_y = (double)(wh - (vy + vh));
+    double rx = (px - (double)vx) / (double)vw;
+    double ry = (py_top - top_y) / (double)vh;
+    bool inside = (rx >= 0.0 && rx < 1.0 && ry >= 0.0 && ry < 1.0);
+    int ix = (int)(rx * 1280.0);
+    int iy = (int)(ry * 720.0);
+    *tx = ix < 0 ? 0 : ix > 1279 ? 1279 : ix;
+    *ty = iy < 0 ? 0 : iy > 719 ? 719 : iy;
+    return inside;
+}
+
 void input_handle_event(const SDL_Event *e) {
     static bool scanned;  // pads present at startup: their ADDED event may have gone to the start screen's loop
     if (!scanned) {
@@ -530,11 +557,29 @@ void input_handle_event(const SDL_Event *e) {
         break;
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
+        if (gl_backend_is_active() && e->button.button == SDL_BUTTON_LEFT && !menu_input_captured()) {
+            int tx = 0, ty = 0;
+            bool inside = window_to_touch_coords(e->button.x, e->button.y, &tx, &ty);
+            if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                if (inside) { touch_mouse_down = true; hid_touch_write(true, tx, ty); }
+            } else if (touch_mouse_down) {
+                touch_mouse_down = false;
+                hid_touch_write(false, tx, ty);
+            }
+        }
         if (!mouse_bindings_active()) break;
         int code = mouse_code_for_sdl_button(e->button.button);
         if (!code) break;
         atomic_store(&mouse_down[code - KEY_MOUSE_BASE], e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ? 1 : 0);
         apply_keyboard_update();
+        break;
+    }
+    case SDL_EVENT_MOUSE_MOTION: {
+        if (gl_backend_is_active() && touch_mouse_down && !menu_input_captured()) {
+            int tx = 0, ty = 0;
+            window_to_touch_coords(e->motion.x, e->motion.y, &tx, &ty);
+            hid_touch_write(true, tx, ty);
+        }
         break;
     }
     case SDL_EVENT_MOUSE_WHEEL: {
@@ -799,11 +844,15 @@ void input_frame(uint64_t frame) {
     watch_arm();
     host_test_frame(frame);
     const char *spec = getenv("LARECOMP_INPUT");
+    if (!spec) spec = getenv("YW1_TEST_SCRIPT");
     if (!spec) return;
     static const char *const names[] = {"A", "B", "X", "Y", "LSTICK", "RSTICK", "L", "R", "ZL", "ZR", "PLUS",
                                         "MINUS", "LEFT", "UP", "RIGHT", "DOWN"};
     uint64_t b = 0;
     int32_t lx = 0, ly = 0, rx = 0, ry = 0;
+    bool script_touch_down = false;
+    int script_touch_x = 0, script_touch_y = 0;
+    static bool prev_script_touch = false;
     static char buf[16384];  // (long scripted sessions: the perf walk is ~4 KB)
     snprintf(buf, sizeof buf, "%s", spec);
     for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
@@ -825,8 +874,17 @@ void input_frame(uint64_t frame) {
         } else if (!strncmp(name, "RSTICK_", 7) && name[7] >= '0' && name[7] <= '9') {  // (a recorded right stick)
             double r = atoi(name + 7) * 3.14159265358979 / 180;
             rx = (int32_t)lround(cos(r) * 32767), ry = (int32_t)lround(sin(r) * 32767);
+        } else if (sscanf(name, "TOUCH_%d_%d", &script_touch_x, &script_touch_y) == 2) {
+            script_touch_down = true;
         }
         for (int i = 0; i < 16; i++) if (!strcmp(name, names[i])) b |= 1ull << i;
+    }
+    if (script_touch_down) {
+        hid_touch_write(true, script_touch_x, script_touch_y);
+        prev_script_touch = true;
+    } else if (prev_script_touch) {
+        hid_touch_write(false, 0, 0);
+        prev_script_touch = false;
     }
     {  // test hooks steering the stick (runtime/hle/doorjump.c LARECOMP_DOORJUMP_TEST)
         extern int32_t g_test_lx, g_test_ly;
@@ -993,7 +1051,7 @@ static void fill_state(Cpu *c) {
     }
     *(uint64_t *)(s + 8) = b;
     static uint64_t last_b;
-    if (b != last_b && getenv("LARECOMP_INPUT")) LOG("[input] id %#x buttons %#llx (sampling %lld, lr %llx)\n", id, (unsigned long long)b, (long long)sampling, c->x[30]);
+    if (b != last_b && (getenv("LARECOMP_INPUT") || getenv("YW1_TEST_SCRIPT"))) LOG("[input] id %#x buttons %#llx (sampling %lld, lr %llx)\n", id, (unsigned long long)b, (long long)sampling, c->x[30]);
     if (b != last_b && getenv("LARECOMP_RECORD_INPUT")) { extern uint64_t renderer_present_count(void); LOG("[record] %llu %#llx\n", (unsigned long long)renderer_present_count(), (unsigned long long)b); }
     last_b = b;
     *(int32_t *)(s + 16) = lx;

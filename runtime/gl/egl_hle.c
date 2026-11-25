@@ -93,8 +93,11 @@ HLE_FUNC("eglDestroySurface", hle_eglDestroySurface) {
 HLE_FUNC("eglMakeCurrent", hle_eglMakeCurrent) {
     uint64_t draw = c->x[1], read = c->x[2], ctx = c->x[3];
     bool make_null = (draw == 0 && read == 0 && ctx == 0);
-    LOG("[egl] eglMakeCurrent(draw=%llu, read=%llu, ctx=%llu)\n",
-        (unsigned long long)draw, (unsigned long long)read, (unsigned long long)ctx);
+    static int nlog;
+    if (++nlog <= 6) {
+        LOG("[egl] eglMakeCurrent(draw=%llu, read=%llu, ctx=%llu)\n",
+            (unsigned long long)draw, (unsigned long long)read, (unsigned long long)ctx);
+    }
     c->x[0] = gl_backend_make_current(make_null) ? 1 : 0;
 }
 

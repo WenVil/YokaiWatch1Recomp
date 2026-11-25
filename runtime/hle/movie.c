@@ -719,6 +719,7 @@ typedef struct {
     OutReady ready[NOUT];
     int nready;
     int width, height, stride, sample_rate, channels;
+    uint32_t uv_off;
     struct SwsContext *sws;
     uint8_t *rgba;
     AVFrame *pending[NPENDING];
@@ -783,11 +784,14 @@ static void dec_configure(Cpu *c) {
     d->height = p->height;
     if (!d->width) md_get_int(m, "width", &d->width);
     if (!d->height) md_get_int(m, "height", &d->height);
-    d->stride = (d->width + 255) & ~255;
+    bool packed_nv12 = gl_backend_is_active();
+    d->stride = packed_nv12 ? d->width : ((d->width + 255) & ~255);
+    int align_h = packed_nv12 ? ((d->height + 1) & ~1) : ((d->height + 15) & ~15);
+    d->uv_off = (uint32_t)d->stride * (uint32_t)align_h;
     d->sample_rate = p->sample_rate;
     d->channels = p->ch_layout.nb_channels;
     d->in_cap = d->video ? 4 << 20 : 256 << 10;
-    d->out_cap = d->video ? (uint32_t)(d->stride * ((d->height + 15) & ~15) * 3 / 2) : 64 << 10;
+    d->out_cap = d->video ? (d->uv_off + (uint32_t)d->stride * (uint32_t)(align_h / 2)) : 64 << 10;
     for (int i = 0; i < NIN; i++) d->in_mem[i] = buf_get(d->in_cap);
     for (int i = 0; i < NOUT; i++) d->out_mem[i] = buf_get(d->out_cap);
     LOG("[movie] decoder %s configured: %dx%d (stride %d) %d Hz %d ch\n", codec->name, d->width, d->height, d->stride, d->sample_rate, d->channels);
@@ -803,7 +807,7 @@ static void dec_register_events(Cpu *c) {
 static void dec_output_format(Decoder *d, MediaData *m) {
     md_clear(m);
     if (d->video) {
-        int uv_offset = d->stride * ((d->height + 15) & ~15);
+        int uv_offset = (int)d->uv_off;
         md_set_str(m, "mime", "video/raw");
         md_set_int(m, "width", d->width);
         md_set_int(m, "height", d->height);
@@ -906,7 +910,7 @@ static bool emit_frame(Decoder *d, AVFrame *f, int64_t time, uint32_t flags) {
     if (flags & MOVIE_EOS) {
         size = 0;
     } else if (d->video) {
-        int h = d->height, w = d->width, uv_off = d->stride * ((h + 15) & ~15);
+        int h = d->height, w = d->width, uv_off = (int)d->uv_off;
         if (f->width > 0 && f->width < w) w = f->width;
         if (f->height > 0 && f->height < h) h = f->height;
         for (int y = 0; y < h; y++) memcpy(o + y * d->stride, f->data[0] + y * f->linesize[0], w);
@@ -1050,14 +1054,14 @@ static void dec_get_output_buffer(Cpu *c) {
         static int gpu = -1;
         if (gpu < 0) gpu = !getenv("LARECOMP_MOVIE_CPU_CONVERT");
         if (gpu && renderer_upload_nv12(t, d->out_mem[i], (uint32_t)w, (uint32_t)h, (uint32_t)d->stride,
-                                        (uint32_t)(d->stride * ((h + 15) & ~15)))) {
+                                        d->uv_off)) {
             c->x[0] = 0;
             return;
         }
         if (!d->sws)
             d->sws = sws_getContext(w, h, AV_PIX_FMT_NV12, w, h, AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
         if (!d->rgba) d->rgba = malloc((size_t)w * h * 4);
-        const uint8_t *src[2] = {d->out_mem[i], d->out_mem[i] + d->stride * ((h + 15) & ~15)};
+        const uint8_t *src[2] = {d->out_mem[i], d->out_mem[i] + d->uv_off};
         int src_stride[2] = {d->stride, d->stride};
         uint8_t *dst[1] = {d->rgba};
         int dst_stride[1] = {w * 4};
