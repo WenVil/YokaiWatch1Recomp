@@ -55,20 +55,24 @@ static bool exists(const char *p) {
     return f != NULL;
 }
 
+static void versioned_name(const char *want, char *ver_name, size_t cap) {
+    ver_name[0] = 0;
+    const char *dash = want ? strrchr(want, '-') : NULL;
+    const char *build16 = (dash && dash[1]) ? dash + 1 : NULL;
+    if (!build16) return;
+    const char *dot = strrchr(GAMELIB_NAME, '.');
+    int stem = dot ? (int)(dot - GAMELIB_NAME) : (int)strlen(GAMELIB_NAME);
+    snprintf(ver_name, cap, "%.*s_%s%s", stem, GAMELIB_NAME, build16, dot ? dot : "");
+}
+
 // The places to look, in order (gamelib.h). Returns how many were filled.
 static int candidates(const char *game_dir, const char *want, char out[10][1100]) {
     int n = 0;
     const char *env = getenv("LARECOMP_GAME_LIB");
     if (env && *env) snprintf(out[n++], 1100, "%s", env);
 
-    const char *dash = want ? strrchr(want, '-') : NULL;
-    const char *build16 = (dash && dash[1]) ? dash + 1 : NULL;
-    char ver_name[96] = "";
-    if (build16) {
-        const char *dot = strrchr(GAMELIB_NAME, '.');
-        int stem = dot ? (int)(dot - GAMELIB_NAME) : (int)strlen(GAMELIB_NAME);
-        snprintf(ver_name, sizeof ver_name, "%.*s_%s%s", stem, GAMELIB_NAME, build16, dot ? dot : "");
-    }
+    char ver_name[96];
+    versioned_name(want, ver_name, sizeof ver_name);
 
     const char *dr = rt_data_root();
     char exe_side[1024];
@@ -88,6 +92,20 @@ static int candidates(const char *game_dir, const char *want, char out[10][1100]
 }
 
 static char g_loaded_want[GAMELIB_FULL_ID_SIZE];
+
+bool gamelib_present_in(const char *dir, const char *game_dir) {
+    char want[GAMELIB_FULL_ID_SIZE];
+    if (!dir || !*dir || !game_dir || !full_id_utf8(game_dir, want, sizeof want)) return false;
+    char ver_name[96];
+    versioned_name(want, ver_name, sizeof ver_name);
+    char cand[1100];
+    if (ver_name[0]) {
+        snprintf(cand, sizeof cand, "%s/%s", dir, ver_name);
+        if (exists(cand) && id_matches(cand, want)) return true;
+    }
+    snprintf(cand, sizeof cand, "%s/%s", dir, GAMELIB_NAME);
+    return exists(cand) && id_matches(cand, want);
+}
 
 bool gamelib_present(const char *game_dir) {
     char want[GAMELIB_FULL_ID_SIZE];

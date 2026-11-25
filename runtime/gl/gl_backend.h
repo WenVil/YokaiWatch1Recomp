@@ -30,6 +30,11 @@ void gl_backend_swap_buffers(void);
 void gl_backend_set_swap_interval(int interval);
 void *gl_backend_get_proc_address(const char *name);
 
+// Input hooks used by GL swap/quit.
+void input_frame(uint64_t frame);
+bool input_should_stop(uint64_t frame);
+void input_shutdown(void);
+
 // Implemented in gl_hle.c.
 void gl_hle_init_procs(void);
 uint64_t gl_hle_lookup_trampoline(const char *name);

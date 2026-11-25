@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include <ctype.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,7 @@
 
 extern uint64_t renderer_present_count(void);
 extern void hid_touch_write(bool down, int x, int y);
+extern void hid_touch_get_state(bool *down, int *x, int *y);
 extern bool menu_input_captured(void);  // runtime/ui/menu.mm: overlay menu or name entry up (it has the keys / pad)
 void input_refresh_bindings(void);
 static bool is_zelda_game(void) { const GameVersion *v = game_version(); return v && !strncmp(v->key, "v1_", 3); }
@@ -348,9 +350,10 @@ bool input_user_blocked(const SDL_Event *e) {
     static int on = -1;
     if (on < 0) {
         const char *v = getenv("LARECOMP_NO_USER_INPUT");
-        on = v ? atoi(v) != 0 : (getenv("LARECOMP_INPUT") || getenv("YW1_TEST_SCRIPT") || getenv("LARECOMP_DOORJUMP_TEST") || getenv("LARECOMP_PLACE") ||
+        on = v ? atoi(v) != 0 : (getenv("LARECOMP_INPUT") || getenv("YW1_TEST_SCRIPT") || getenv("YW1_REPLAY_INPUT") ||
+                                 getenv("LARECOMP_DOORJUMP_TEST") || getenv("LARECOMP_PLACE") ||
                                  getenv("LARECOMP_HOST_INPUT") || getenv("LARECOMP_BIND_TEST"));
-        if (on) LOG("[input] scripted run: keyboard, mouse and controllers ignored\n");
+        if (on) LOG("[input] scripted/replay run: keyboard, mouse and controllers ignored\n");
     }
     if (!on) return false;
     if (test_event(e)) return false;  // (LARECOMP_HOST_INPUT type: / sdlkey: / sdlpad: - the test's own presses)
@@ -505,7 +508,8 @@ static int mouse_code_for_sdl_button(Uint8 btn) {
 }
 
 static bool mouse_bindings_active(void) {
-    return !menu_input_captured() && !host_test && !getenv("LARECOMP_INPUT") && !getenv("LARECOMP_RECORD_INPUT");
+    return !menu_input_captured() && !host_test && !getenv("LARECOMP_INPUT") && !getenv("YW1_TEST_SCRIPT") &&
+           !getenv("LARECOMP_RECORD_INPUT") && !getenv("YW1_RECORD_INPUT") && !getenv("YW1_REPLAY_INPUT");
 }
 
 static void apply_keyboard_update(void) {
@@ -822,11 +826,205 @@ static void host_test_frame(uint64_t frame) {
     }
 }
 
+typedef struct {
+    uint64_t frame;
+    uint64_t buttons;
+    int32_t lx, ly, rx, ry;
+    int touch_down, tx, ty;
+} InputTapeEvent;
+
+static pthread_mutex_t g_tape_lock = PTHREAD_MUTEX_INITIALIZER;
+static FILE *g_rec_fp;
+static char g_rec_path[1100];
+static bool g_rec_inited;
+static uint64_t g_rec_count;
+static InputTapeEvent g_rec_prev;
+static uint64_t g_rec_last_b;
+static int32_t g_rec_last_lx, g_rec_last_ly, g_rec_last_rx, g_rec_last_ry;
+
+static InputTapeEvent *g_replay_events;
+static size_t g_replay_count, g_replay_cap, g_replay_idx;
+static bool g_replay_inited, g_replay_active;
+static uint64_t g_replay_last_frame;
+static InputTapeEvent g_replay_cur;
+static int g_replay_prev_td, g_replay_prev_tx, g_replay_prev_ty;
+
+static void rec_init_locked(void) {
+    if (g_rec_inited) return;
+    g_rec_inited = true;
+    const char *p = getenv("YW1_RECORD_INPUT");
+    if (!p || !*p) return;
+    snprintf(g_rec_path, sizeof g_rec_path, "%s", p);
+    g_rec_fp = plat_fopen(g_rec_path, "wb");
+    if (!g_rec_fp) {
+        LOG("[record] WARN: failed to open %s for writing\n", g_rec_path);
+        return;
+    }
+    fprintf(g_rec_fp, "# frame buttons lx ly rx ry touch_down tx ty\n");
+    fflush(g_rec_fp);
+    LOG("[record] recording input -> %s\n", g_rec_path);
+}
+
+static bool axis_changed(int32_t a, int32_t b) {
+    if (a == b) return false;
+    if (a == 0 || b == 0) return true;
+    int32_t d = a - b;
+    return d > 256 || d < -256;
+}
+
+static void rec_maybe_emit_locked(uint64_t frame, uint64_t b, int32_t lx, int32_t ly, int32_t rx, int32_t ry,
+                                  int td, int tx, int ty) {
+    if (!g_rec_fp) return;
+    if (!td) tx = ty = 0;
+    if (b == g_rec_prev.buttons && !axis_changed(lx, g_rec_prev.lx) && !axis_changed(ly, g_rec_prev.ly) &&
+        !axis_changed(rx, g_rec_prev.rx) && !axis_changed(ry, g_rec_prev.ry) &&
+        td == g_rec_prev.touch_down && tx == g_rec_prev.tx && ty == g_rec_prev.ty) {
+        return;
+    }
+    g_rec_prev.frame = frame;
+    g_rec_prev.buttons = b;
+    g_rec_prev.lx = lx;
+    g_rec_prev.ly = ly;
+    g_rec_prev.rx = rx;
+    g_rec_prev.ry = ry;
+    g_rec_prev.touch_down = td;
+    g_rec_prev.tx = tx;
+    g_rec_prev.ty = ty;
+    fprintf(g_rec_fp, "%llu 0x%llx %d %d %d %d %d %d %d\n", (unsigned long long)frame,
+            (unsigned long long)b, lx, ly, rx, ry, td, tx, ty);
+    fflush(g_rec_fp);
+    g_rec_count++;
+}
+
+static void replay_init_locked(void) {
+    if (g_replay_inited) return;
+    g_replay_inited = true;
+    const char *p = getenv("YW1_REPLAY_INPUT");
+    if (!p || !*p) return;
+    FILE *f = plat_fopen(p, "rb");
+    if (!f) FATAL("[replay] cannot open YW1_REPLAY_INPUT: %s\n", p);
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        char *s = line;
+        while (*s && isspace((unsigned char)*s)) s++;
+        if (!*s || *s == '#') continue;
+        char *end = NULL;
+        unsigned long long fr = strtoull(s, &end, 10);
+        if (end == s) continue;
+        s = end;
+        unsigned long long btn = strtoull(s, &end, 0);
+        if (end == s) continue;
+        s = end;
+        int32_t lx = 0, ly = 0, rx = 0, ry = 0;
+        int td = 0, tx = 0, ty = 0;
+        if (sscanf(s, "%d %d %d %d %d %d %d", &lx, &ly, &rx, &ry, &td, &tx, &ty) != 7) continue;
+        if (g_replay_count == g_replay_cap) {
+            g_replay_cap = g_replay_cap ? g_replay_cap * 2 : 128;
+            g_replay_events = (InputTapeEvent *)realloc(g_replay_events, g_replay_cap * sizeof *g_replay_events);
+        }
+        InputTapeEvent *ev = &g_replay_events[g_replay_count++];
+        ev->frame = (uint64_t)fr;
+        ev->buttons = (uint64_t)btn;
+        ev->lx = lx;
+        ev->ly = ly;
+        ev->rx = rx;
+        ev->ry = ry;
+        ev->touch_down = td ? 1 : 0;
+        ev->tx = tx;
+        ev->ty = ty;
+        if ((uint64_t)fr > g_replay_last_frame) g_replay_last_frame = (uint64_t)fr;
+    }
+    fclose(f);
+    g_replay_active = true;
+    g_replay_idx = 0;
+    memset(&g_replay_cur, 0, sizeof g_replay_cur);
+    g_replay_prev_td = g_replay_prev_tx = g_replay_prev_ty = 0;
+    LOG("[replay] loaded %zu transitions (last_frame=%llu) from %s\n",
+        g_replay_count, (unsigned long long)g_replay_last_frame, p);
+}
+
+static void replay_advance_locked(uint64_t frame, bool sync_touch) {
+    while (g_replay_idx < g_replay_count && g_replay_events[g_replay_idx].frame <= frame) {
+        g_replay_cur = g_replay_events[g_replay_idx++];
+    }
+    if (sync_touch && (g_replay_cur.touch_down != g_replay_prev_td ||
+                       (g_replay_cur.touch_down &&
+                        (g_replay_cur.tx != g_replay_prev_tx || g_replay_cur.ty != g_replay_prev_ty)))) {
+        hid_touch_write(g_replay_cur.touch_down != 0, g_replay_cur.tx, g_replay_cur.ty);
+        g_replay_prev_td = g_replay_cur.touch_down;
+        g_replay_prev_tx = g_replay_cur.tx;
+        g_replay_prev_ty = g_replay_cur.ty;
+    }
+}
+
+bool input_should_stop(uint64_t frame) {
+    static int stop_init;
+    static uint64_t stop_at;
+    static long tail_frames = 60;
+    if (!stop_init) {
+        stop_init = 1;
+        const char *s = getenv("YW1_REPLAY_STOP_AT");
+        if (s && *s) stop_at = strtoull(s, NULL, 10);
+        const char *tl = getenv("YW1_REPLAY_TAIL");
+        if (tl && *tl) tail_frames = strtol(tl, NULL, 10);
+    }
+    if (stop_at > 0 && frame >= stop_at) return true;
+    pthread_mutex_lock(&g_tape_lock);
+    replay_init_locked();
+    bool active = g_replay_active;
+    size_t cnt = g_replay_count;
+    uint64_t last_f = g_replay_last_frame;
+    pthread_mutex_unlock(&g_tape_lock);
+    if (active && stop_at == 0 && tail_frames >= 0 && cnt > 0 && frame >= last_f + (uint64_t)tail_frames) {
+        return true;
+    }
+    return false;
+}
+
+void input_shutdown(void) {
+    pthread_mutex_lock(&g_tape_lock);
+    if (g_rec_fp) {
+        fflush(g_rec_fp);
+        fclose(g_rec_fp);
+        g_rec_fp = NULL;
+        LOG("[record] closed (%llu transitions written to %s)\n",
+            (unsigned long long)g_rec_count, g_rec_path);
+    }
+    if (g_replay_active) {
+        LOG("[replay] completed (%zu/%zu transitions applied, last_frame=%llu)\n",
+            g_replay_idx, g_replay_count, (unsigned long long)g_replay_last_frame);
+    }
+    pthread_mutex_unlock(&g_tape_lock);
+}
+
 static uint64_t g_pad_obj;
 volatile int g_inject_plus;  // frames to hold Plus for the game (movie.c: A/B skip the opening on rando seeds)
-RT_ON_RESET(input_reboot_reset) { g_pad_obj = 0; g_inject_plus = 0; }  // (reboot: the controller object was guest memory)
+RT_ON_RESET(input_reboot_reset) {
+    g_pad_obj = 0;
+    g_inject_plus = 0;
+    pthread_mutex_lock(&g_tape_lock);
+    memset(&g_rec_prev, 0, sizeof g_rec_prev);
+    g_rec_last_b = 0;
+    g_rec_last_lx = g_rec_last_ly = g_rec_last_rx = g_rec_last_ry = 0;
+    g_replay_idx = 0;
+    memset(&g_replay_cur, 0, sizeof g_replay_cur);
+    g_replay_prev_td = g_replay_prev_tx = g_replay_prev_ty = 0;
+    pthread_mutex_unlock(&g_tape_lock);
+}
 void input_frame(uint64_t frame) {
     atomic_store(&rumble_frame_ms, SDL_GetTicks());
+    pthread_mutex_lock(&g_tape_lock);
+    replay_init_locked();
+    if (g_replay_active) replay_advance_locked(frame, true);
+    rec_init_locked();
+    if (g_rec_fp) {
+        bool td = false;
+        int tx = 0, ty = 0;
+        hid_touch_get_state(&td, &tx, &ty);
+        rec_maybe_emit_locked(frame, g_rec_last_b, g_rec_last_lx, g_rec_last_ly, g_rec_last_rx, g_rec_last_ry,
+                              td ? 1 : 0, tx, ty);
+    }
+    pthread_mutex_unlock(&g_tape_lock);
     if (g_pad_obj && getenv("LARECOMP_DUMP_PAD") && frame % 600 == 0) {
         const uint8_t *m = (const uint8_t *)(uintptr_t)(g_pad_obj - 0x98);
         LOG("[pad] mgr %llx 4e0=%u 4e4=%u 4e8=%u 548=%#x 54c..=%02x %02x %02x 56c=%02x\n", g_pad_obj - 0x98,
@@ -1049,9 +1247,36 @@ static void fill_state(Cpu *c) {
         b = tracker_map_input(b, st);
         lx = st[0], ly = st[1], rx = st[2], ry = st[3];
     }
+    bool replay_active = false;
+    pthread_mutex_lock(&g_tape_lock);
+    replay_init_locked();
+    if (g_replay_active) {
+        replay_advance_locked(cur_frame, false);
+        b = g_replay_cur.buttons;
+        lx = g_replay_cur.lx;
+        ly = g_replay_cur.ly;
+        rx = g_replay_cur.rx;
+        ry = g_replay_cur.ry;
+        replay_active = true;
+    }
+    rec_init_locked();
+    if (g_rec_fp) {
+        g_rec_last_b = b;
+        g_rec_last_lx = lx;
+        g_rec_last_ly = ly;
+        g_rec_last_rx = rx;
+        g_rec_last_ry = ry;
+        bool td = false;
+        int tx = 0, ty = 0;
+        hid_touch_get_state(&td, &tx, &ty);
+        rec_maybe_emit_locked(cur_frame, b, lx, ly, rx, ry, td ? 1 : 0, tx, ty);
+    }
+    pthread_mutex_unlock(&g_tape_lock);
     *(uint64_t *)(s + 8) = b;
     static uint64_t last_b;
-    if (b != last_b && (getenv("LARECOMP_INPUT") || getenv("YW1_TEST_SCRIPT"))) LOG("[input] id %#x buttons %#llx (sampling %lld, lr %llx)\n", id, (unsigned long long)b, (long long)sampling, c->x[30]);
+    if (b != last_b && (getenv("LARECOMP_INPUT") || getenv("YW1_TEST_SCRIPT") || replay_active)) {
+        LOG("[input] id %#x buttons %#llx (sampling %lld, lr %llx)\n", id, (unsigned long long)b, (long long)sampling, c->x[30]);
+    }
     if (b != last_b && getenv("LARECOMP_RECORD_INPUT")) { extern uint64_t renderer_present_count(void); LOG("[record] %llu %#llx\n", (unsigned long long)renderer_present_count(), (unsigned long long)b); }
     last_b = b;
     *(int32_t *)(s + 16) = lx;

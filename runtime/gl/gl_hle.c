@@ -9,9 +9,13 @@
 #include "../cpu.h"
 #include "../hle.h"
 #include "../nvn/astc.h"
+#include "../platform.h"
 #include "../rt.h"
 #include "../simd.h"
 #include "gl_backend.h"
+
+extern void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out, uint64_t *am_cmds_out,
+                              char *svcs_buf, size_t svcs_cap);
 
 #ifndef APIENTRY
 #define APIENTRY
@@ -356,8 +360,47 @@ static int g_shader_ok, g_shader_fail, g_prog_ok, g_prog_fail, g_shader_src_logs
 static struct {
     GLenum fmt;
     uint32_t count;
-} g_comp_fmts[32];
+    bool astc_sw;
+    uint64_t astc_ns;
+} g_comp_fmts[64];
 static int g_ncomp_fmts;
+
+// Texture / Renderbuffer dimensions for offscreen FBO attachment telemetry
+#define OBJ_DIM_CAP 4096
+typedef struct {
+    GLuint id;
+    GLenum fmt;
+    GLsizei w, h;
+    bool used;
+} ObjDimSlot;
+static ObjDimSlot g_tex_dims[OBJ_DIM_CAP];
+static ObjDimSlot g_rbo_dims[OBJ_DIM_CAP];
+static GLuint g_cur_tex2d, g_cur_rbo;
+
+typedef struct {
+    GLsizei w, h;
+    GLenum fmt;
+    bool is_rbo;
+    uint32_t unique_slots;
+    uint64_t bind_count;
+} OffscreenFboStat;
+static OffscreenFboStat g_fbo_stats[64];
+static int g_nfbo_stats;
+static struct {
+    GLuint fbo;
+    GLenum attachment;
+    GLsizei w, h;
+    GLenum fmt;
+    bool is_rbo;
+} g_fbo_seen[256];
+static int g_nfbo_seen;
+
+typedef struct {
+    GLsizei w, h;
+    uint64_t count;
+} ViewportStat;
+static ViewportStat g_vp_stats[64];
+static int g_nvp_stats;
 
 // Virtual 1080p default framebuffer & guest FBO=0 tracking
 static GLuint g_virtual_fbo;
@@ -365,6 +408,106 @@ static GLuint g_vfbo_color;
 static GLuint g_vfbo_depth;
 static GLuint g_guest_draw_fbo;
 static GLuint g_guest_read_fbo;
+
+static void obj_dim_set_locked(ObjDimSlot *tab, GLuint id, GLenum fmt, GLsizei w, GLsizei h) {
+    if (!id || w <= 0 || h <= 0) return;
+    uint32_t idx = (uint32_t)(id * 2654435761u) & (OBJ_DIM_CAP - 1);
+    for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
+        ObjDimSlot *s = &tab[(idx + i) & (OBJ_DIM_CAP - 1)];
+        if (!s->used || s->id == id) {
+            s->id = id;
+            s->fmt = fmt;
+            s->w = w;
+            s->h = h;
+            s->used = true;
+            return;
+        }
+    }
+}
+
+static bool obj_dim_get_locked(const ObjDimSlot *tab, GLuint id, GLenum *fmt_out, GLsizei *w_out, GLsizei *h_out) {
+    if (!id) return false;
+    uint32_t idx = (uint32_t)(id * 2654435761u) & (OBJ_DIM_CAP - 1);
+    for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
+        const ObjDimSlot *s = &tab[(idx + i) & (OBJ_DIM_CAP - 1)];
+        if (!s->used) return false;
+        if (s->id == id) {
+            if (fmt_out) *fmt_out = s->fmt;
+            if (w_out) *w_out = s->w;
+            if (h_out) *h_out = s->h;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void record_offscreen_fbo(GLenum target, GLenum attachment, bool is_rbo, GLuint obj_id) {
+    if (!obj_id) return;
+    GLuint fbo = (target == GL_READ_FRAMEBUFFER) ? g_guest_read_fbo : g_guest_draw_fbo;
+    if (fbo == 0) return;
+    pthread_mutex_lock(&g_gl_lock);
+    GLenum fmt = 0;
+    GLsizei w = 0, h = 0;
+    if (obj_dim_get_locked(is_rbo ? g_rbo_dims : g_tex_dims, obj_id, &fmt, &w, &h) && w > 0 && h > 0) {
+        bool is_new_slot = true;
+        for (int i = 0; i < g_nfbo_seen; i++) {
+            if (g_fbo_seen[i].fbo == fbo && g_fbo_seen[i].attachment == attachment &&
+                g_fbo_seen[i].w == w && g_fbo_seen[i].h == h && g_fbo_seen[i].fmt == fmt &&
+                g_fbo_seen[i].is_rbo == is_rbo) {
+                is_new_slot = false;
+                break;
+            }
+        }
+        if (is_new_slot && g_nfbo_seen < 256) {
+            g_fbo_seen[g_nfbo_seen].fbo = fbo;
+            g_fbo_seen[g_nfbo_seen].attachment = attachment;
+            g_fbo_seen[g_nfbo_seen].w = w;
+            g_fbo_seen[g_nfbo_seen].h = h;
+            g_fbo_seen[g_nfbo_seen].fmt = fmt;
+            g_fbo_seen[g_nfbo_seen].is_rbo = is_rbo;
+            g_nfbo_seen++;
+        }
+        int sidx = -1;
+        for (int i = 0; i < g_nfbo_stats; i++) {
+            if (g_fbo_stats[i].w == w && g_fbo_stats[i].h == h && g_fbo_stats[i].fmt == fmt &&
+                g_fbo_stats[i].is_rbo == is_rbo) {
+                sidx = i;
+                break;
+            }
+        }
+        if (sidx < 0 && g_nfbo_stats < 64) {
+            sidx = g_nfbo_stats++;
+            g_fbo_stats[sidx].w = w;
+            g_fbo_stats[sidx].h = h;
+            g_fbo_stats[sidx].fmt = fmt;
+            g_fbo_stats[sidx].is_rbo = is_rbo;
+            g_fbo_stats[sidx].unique_slots = 0;
+            g_fbo_stats[sidx].bind_count = 0;
+        }
+        if (sidx >= 0) {
+            if (is_new_slot) g_fbo_stats[sidx].unique_slots++;
+            g_fbo_stats[sidx].bind_count++;
+        }
+    }
+    pthread_mutex_unlock(&g_gl_lock);
+}
+
+static void record_viewport_stat(GLsizei w, GLsizei h) {
+    if (w < 0 || h < 0) return;
+    pthread_mutex_lock(&g_gl_lock);
+    int idx = -1;
+    for (int i = 0; i < g_nvp_stats; i++) {
+        if (g_vp_stats[i].w == w && g_vp_stats[i].h == h) { idx = i; break; }
+    }
+    if (idx < 0 && g_nvp_stats < 64) {
+        idx = g_nvp_stats++;
+        g_vp_stats[idx].w = w;
+        g_vp_stats[idx].h = h;
+        g_vp_stats[idx].count = 0;
+    }
+    if (idx >= 0) g_vp_stats[idx].count++;
+    pthread_mutex_unlock(&g_gl_lock);
+}
 
 // Letterbox rect on host window for touch coordinate conversion
 static int g_vp_x = 0, g_vp_y = 0, g_vp_w = 1280, g_vp_h = 720, g_win_w = 1280, g_win_h = 720;
@@ -391,6 +534,15 @@ RT_ON_RESET(gl_hle_reset) {
     g_shader_ok = g_shader_fail = g_prog_ok = g_prog_fail = g_shader_src_logs = 0;
     g_ncomp_fmts = 0;
     memset(g_comp_fmts, 0, sizeof g_comp_fmts);
+    memset(g_tex_dims, 0, sizeof g_tex_dims);
+    memset(g_rbo_dims, 0, sizeof g_rbo_dims);
+    g_cur_tex2d = g_cur_rbo = 0;
+    memset(g_fbo_stats, 0, sizeof g_fbo_stats);
+    g_nfbo_stats = 0;
+    memset(g_fbo_seen, 0, sizeof g_fbo_seen);
+    g_nfbo_seen = 0;
+    memset(g_vp_stats, 0, sizeof g_vp_stats);
+    g_nvp_stats = 0;
     g_virtual_fbo = g_vfbo_color = g_vfbo_depth = 0;
     g_guest_draw_fbo = g_guest_read_fbo = 0;
     memset(g_gl_err_stats, 0, sizeof g_gl_err_stats);
@@ -593,13 +745,51 @@ void gl_hle_read_backbuffer_rgb(int w, int h, uint8_t *bgr_out) {
 }
 
 void gl_hle_log_summary(void) {
+    extern void hid_vibration_counts(uint64_t *single_out, uint64_t *batch_out);
+    uint64_t ipc_misses = 0, ipc_stub_cmds = 0, am_unhandled = 0;
+    char ipc_svcs[512] = "";
+    ipc_get_telemetry(&ipc_misses, &ipc_stub_cmds, &am_unhandled, ipc_svcs, sizeof ipc_svcs);
+    uint64_t vib_single = 0, vib_batch = 0;
+    hid_vibration_counts(&vib_single, &vib_batch);
+
     pthread_mutex_lock(&g_gl_lock);
     LOG("[gl] SUMMARY: shaders(ok=%d fail=%d) programs(ok=%d fail=%d) epa(hits=%u misses=%u) glErrors=%llu\n",
         g_shader_ok, g_shader_fail, g_prog_ok, g_prog_fail,
         g_epa_hits, g_epa_misses, (unsigned long long)g_gl_err_total);
-    for (int i = 0; i < g_ncomp_fmts; i++) {
-        LOG("[gl] SUMMARY compressed fmt=0x%04x count=%u\n",
-            (unsigned)g_comp_fmts[i].fmt, g_comp_fmts[i].count);
+    uint64_t astc_calls = 0, astc_ns = 0;
+    if (g_ncomp_fmts == 0) {
+        LOG("[gl] SUMMARY compressed_tex: none\n");
+    } else {
+        for (int i = 0; i < g_ncomp_fmts; i++) {
+            if (g_comp_fmts[i].astc_sw) {
+                astc_calls += g_comp_fmts[i].count;
+                astc_ns += g_comp_fmts[i].astc_ns;
+            }
+            LOG("[gl] SUMMARY compressed fmt=0x%04x count=%u astc_sw=%s astc_ms=%.2f\n",
+                (unsigned)g_comp_fmts[i].fmt, g_comp_fmts[i].count,
+                g_comp_fmts[i].astc_sw ? "yes" : "no",
+                (double)g_comp_fmts[i].astc_ns / 1e6);
+        }
+    }
+    LOG("[gl] SUMMARY astc_total: sw_decodes=%llu decode_ms=%.2f\n",
+        (unsigned long long)astc_calls, (double)astc_ns / 1e6);
+    if (g_nfbo_stats == 0) {
+        LOG("[gl] SUMMARY offscreen_fbo: none (game only used default FBO 0)\n");
+    } else {
+        for (int i = 0; i < g_nfbo_stats; i++) {
+            LOG("[gl] SUMMARY offscreen_fbo %dx%d fmt=0x%04x kind=%s unique_slots=%u binds=%llu\n",
+                (int)g_fbo_stats[i].w, (int)g_fbo_stats[i].h, (unsigned)g_fbo_stats[i].fmt,
+                g_fbo_stats[i].is_rbo ? "rbo" : "tex", g_fbo_stats[i].unique_slots,
+                (unsigned long long)g_fbo_stats[i].bind_count);
+        }
+    }
+    if (g_nvp_stats == 0) {
+        LOG("[gl] SUMMARY viewport: none\n");
+    } else {
+        for (int i = 0; i < g_nvp_stats; i++) {
+            LOG("[gl] SUMMARY viewport %dx%d count=%llu\n",
+                (int)g_vp_stats[i].w, (int)g_vp_stats[i].h, (unsigned long long)g_vp_stats[i].count);
+        }
     }
     for (int i = 0; i < g_gl_err_kind_n; i++) {
         LOG("[gl] SUMMARY glError 0x%04x count=%llu frames=[%llu..%llu]\n",
@@ -607,6 +797,9 @@ void gl_hle_log_summary(void) {
             (unsigned long long)g_gl_err_stats[i].first_frame,
             (unsigned long long)g_gl_err_stats[i].last_frame);
     }
+    LOG("[gl] SUMMARY ipc_hid: unhandled_services=%llu (%s) stub_cmds=%llu am_unhandled_cmds=%llu SendVibrationValue=%llu SendVibrationValues=%llu\n",
+        (unsigned long long)ipc_misses, ipc_svcs, (unsigned long long)ipc_stub_cmds,
+        (unsigned long long)am_unhandled, (unsigned long long)vib_single, (unsigned long long)vib_batch);
     pthread_mutex_unlock(&g_gl_lock);
 }
 
@@ -632,8 +825,26 @@ static void hle_glBindFramebuffer(Cpu *c) {
     GLuint real_fb = (fb == 0 && g_virtual_fbo != 0) ? g_virtual_fbo : fb;
     g_gl.p_glBindFramebuffer(target, real_fb);
 }
-static void hle_glBindRenderbuffer(Cpu *c) { g_gl.p_glBindRenderbuffer(U32(0), U32(1)); }
-static void hle_glBindTexture(Cpu *c) { g_gl.p_glBindTexture(U32(0), U32(1)); }
+static void hle_glBindRenderbuffer(Cpu *c) {
+    GLenum target = U32(0);
+    GLuint rbo = U32(1);
+    if (target == GL_RENDERBUFFER) {
+        pthread_mutex_lock(&g_gl_lock);
+        g_cur_rbo = rbo;
+        pthread_mutex_unlock(&g_gl_lock);
+    }
+    g_gl.p_glBindRenderbuffer(target, rbo);
+}
+static void hle_glBindTexture(Cpu *c) {
+    GLenum target = U32(0);
+    GLuint tex = U32(1);
+    if (target == GL_TEXTURE_2D) {
+        pthread_mutex_lock(&g_gl_lock);
+        g_cur_tex2d = tex;
+        pthread_mutex_unlock(&g_gl_lock);
+    }
+    g_gl.p_glBindTexture(target, tex);
+}
 static void hle_glBlendEquationSeparate(Cpu *c) { g_gl.p_glBlendEquationSeparate(U32(0), U32(1)); }
 static void hle_glBlendFuncSeparate(Cpu *c) { g_gl.p_glBlendFuncSeparate(U32(0), U32(1), U32(2), U32(3)); }
 static void hle_glBufferData(Cpu *c) { g_gl.p_glBufferData(U32(0), SZP(1), CPTR(2), U32(3)); }
@@ -766,13 +977,18 @@ static void hle_glCompressedTexImage2D(Cpu *c) {
             break;
         }
     }
-    if (idx < 0 && g_ncomp_fmts < 32) {
+    if (idx < 0 && g_ncomp_fmts < 64) {
         idx = g_ncomp_fmts++;
         g_comp_fmts[idx].fmt = internalformat;
         g_comp_fmts[idx].count = 0;
+        g_comp_fmts[idx].astc_sw = is_astc;
+        g_comp_fmts[idx].astc_ns = 0;
         first_seen = true;
     }
-    if (idx >= 0) g_comp_fmts[idx].count++;
+    if (idx >= 0) {
+        g_comp_fmts[idx].count++;
+        if (is_astc) g_comp_fmts[idx].astc_sw = true;
+    }
     pthread_mutex_unlock(&g_gl_lock);
 
     if (first_seen) {
@@ -785,7 +1001,14 @@ static void hle_glCompressedTexImage2D(Cpu *c) {
         if (width > 0 && height > 0 && data) {
             uint8_t *rgba = malloc((size_t)width * (size_t)height * 4);
             if (rgba) {
+                uint64_t t0 = plat_now_ns();
                 astc_decode_ldr((const uint8_t *)data, (uint32_t)width, (uint32_t)height, bw, bh, srgb, rgba);
+                uint64_t dt = plat_now_ns() - t0;
+                if (idx >= 0) {
+                    pthread_mutex_lock(&g_gl_lock);
+                    g_comp_fmts[idx].astc_ns += dt;
+                    pthread_mutex_unlock(&g_gl_lock);
+                }
                 g_gl.p_glTexImage2D(target, level, srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8, width, height, border, GL_RGBA,
                                     GL_UNSIGNED_BYTE, rgba);
                 free(rgba);
@@ -863,8 +1086,19 @@ static void hle_glDrawElements(Cpu *c) { g_gl.p_glDrawElements(U32(0), I32(1), U
 static void hle_glEnable(Cpu *c) { g_gl.p_glEnable(U32(0)); }
 static void hle_glEnableVertexAttribArray(Cpu *c) { g_gl.p_glEnableVertexAttribArray(U32(0)); }
 static void hle_glFinish(Cpu *c) { (void)c; g_gl.p_glFinish(); }
-static void hle_glFramebufferRenderbuffer(Cpu *c) { g_gl.p_glFramebufferRenderbuffer(U32(0), U32(1), U32(2), U32(3)); }
-static void hle_glFramebufferTexture2D(Cpu *c) { g_gl.p_glFramebufferTexture2D(U32(0), U32(1), U32(2), U32(3), I32(4)); }
+static void hle_glFramebufferRenderbuffer(Cpu *c) {
+    GLenum target = U32(0), attachment = U32(1), rbt = U32(2);
+    GLuint rb = U32(3);
+    record_offscreen_fbo(target, attachment, true, rb);
+    g_gl.p_glFramebufferRenderbuffer(target, attachment, rbt, rb);
+}
+static void hle_glFramebufferTexture2D(Cpu *c) {
+    GLenum target = U32(0), attachment = U32(1), textarget = U32(2);
+    GLuint tex = U32(3);
+    GLint level = I32(4);
+    record_offscreen_fbo(target, attachment, false, tex);
+    g_gl.p_glFramebufferTexture2D(target, attachment, textarget, tex, level);
+}
 static void hle_glGenBuffers(Cpu *c) { g_gl.p_glGenBuffers(I32(0), (GLuint *)PTR(1)); }
 static void hle_glGenFramebuffers(Cpu *c) { g_gl.p_glGenFramebuffers(I32(0), (GLuint *)PTR(1)); }
 static void hle_glGenRenderbuffers(Cpu *c) { g_gl.p_glGenRenderbuffers(I32(0), (GLuint *)PTR(1)); }
@@ -960,13 +1194,33 @@ static void hle_glReadBuffer(Cpu *c) {
     if (g_gl.p_glReadBuffer) g_gl.p_glReadBuffer(rewrite_default_fbo_buf(U32(0), false));
 }
 static void hle_glReadPixels(Cpu *c) { g_gl.p_glReadPixels(I32(0), I32(1), I32(2), I32(3), U32(4), U32(5), PTR(6)); }
-static void hle_glRenderbufferStorage(Cpu *c) { g_gl.p_glRenderbufferStorage(U32(0), U32(1), I32(2), I32(3)); }
+static void hle_glRenderbufferStorage(Cpu *c) {
+    GLenum target = U32(0), fmt = U32(1);
+    GLsizei w = I32(2), h = I32(3);
+    if (target == GL_RENDERBUFFER && w > 0 && h > 0) {
+        pthread_mutex_lock(&g_gl_lock);
+        obj_dim_set_locked(g_rbo_dims, g_cur_rbo, fmt, w, h);
+        pthread_mutex_unlock(&g_gl_lock);
+    }
+    g_gl.p_glRenderbufferStorage(target, fmt, w, h);
+}
 static void hle_glScissor(Cpu *c) { g_gl.p_glScissor(I32(0), I32(1), I32(2), I32(3)); }
 static void hle_glStencilFunc(Cpu *c) { g_gl.p_glStencilFunc(U32(0), I32(1), U32(2)); }
 static void hle_glStencilMask(Cpu *c) { g_gl.p_glStencilMask(U32(0)); }
 static void hle_glStencilOp(Cpu *c) { g_gl.p_glStencilOp(U32(0), U32(1), U32(2)); }
 static void hle_glTexImage2D(Cpu *c) {
-    g_gl.p_glTexImage2D(U32(0), I32(1), I32(2), I32(3), I32(4), I32(5), U32(6), U32(7), STK_PTR(0));
+    GLenum target = U32(0);
+    GLint level = I32(1), int_fmt = I32(2);
+    GLsizei w = I32(3), h = I32(4);
+    GLint border = I32(5);
+    GLenum fmt = U32(6), type = U32(7);
+    const void *pixels = STK_PTR(0);
+    if (target == GL_TEXTURE_2D && level == 0 && w > 0 && h > 0) {
+        pthread_mutex_lock(&g_gl_lock);
+        obj_dim_set_locked(g_tex_dims, g_cur_tex2d, (GLenum)int_fmt, w, h);
+        pthread_mutex_unlock(&g_gl_lock);
+    }
+    g_gl.p_glTexImage2D(target, level, int_fmt, w, h, border, fmt, type, pixels);
 }
 static void hle_glTexParameterf(Cpu *c) { g_gl.p_glTexParameterf(U32(0), U32(1), F32(0)); }
 static void hle_glTexParameterfv(Cpu *c) { g_gl.p_glTexParameterfv(U32(0), U32(1), (const GLfloat *)CPTR(2)); }
@@ -1000,7 +1254,12 @@ static void hle_glVertexAttrib4fv(Cpu *c) { g_gl.p_glVertexAttrib4fv(U32(0), (co
 static void hle_glVertexAttribPointer(Cpu *c) {
     g_gl.p_glVertexAttribPointer(U32(0), I32(1), U32(2), U8(3), I32(4), CPTR(5));
 }
-static void hle_glViewport(Cpu *c) { g_gl.p_glViewport(I32(0), I32(1), I32(2), I32(3)); }
+static void hle_glViewport(Cpu *c) {
+    GLint x = I32(0), y = I32(1);
+    GLsizei w = I32(2), h = I32(3);
+    record_viewport_stat(w, h);
+    g_gl.p_glViewport(x, y, w, h);
+}
 
 // Adjacent safety helpers
 static void hle_glGetError(Cpu *c) { c->x[0] = (uint64_t)(g_gl.p_glGetError ? g_gl.p_glGetError() : 0); }

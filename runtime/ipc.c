@@ -1,9 +1,12 @@
 // IPC message parsing/serialization and session management.
+#include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "hle.h"
 #include "ipc.h"
+#include "rt.h"
 
 #ifdef __APPLE__
 extern const ServiceDef __start_services[] __asm__("section$start$__DATA$__services");
@@ -16,7 +19,58 @@ __attribute__((section(".svc$a"), used)) static const ServiceDef __start_service
 __attribute__((section(".svc$z"), used)) static const ServiceDef __stop_services[1];
 #endif
 
+static pthread_mutex_t g_ipc_stat_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t g_ipc_svc_misses;
+static uint64_t g_ipc_stub_cmds;
+static uint64_t g_ipc_am_unhandled;
+static struct {
+    char name[16];
+    uint32_t count;
+} g_ipc_unhandled_svcs[32];
+static int g_ipc_unhandled_svc_n;
+
+RT_ON_RESET(ipc_telemetry_reset) {
+    pthread_mutex_lock(&g_ipc_stat_lock);
+    g_ipc_svc_misses = 0;
+    g_ipc_stub_cmds = 0;
+    g_ipc_am_unhandled = 0;
+    memset(g_ipc_unhandled_svcs, 0, sizeof g_ipc_unhandled_svcs);
+    g_ipc_unhandled_svc_n = 0;
+    pthread_mutex_unlock(&g_ipc_stat_lock);
+}
+
+void ipc_note_unhandled_iface(const char *iface, uint32_t cmd) {
+    (void)iface;
+    (void)cmd;
+    pthread_mutex_lock(&g_ipc_stat_lock);
+    g_ipc_am_unhandled++;
+    pthread_mutex_unlock(&g_ipc_stat_lock);
+}
+
+void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out, uint64_t *am_cmds_out,
+                       char *svcs_buf, size_t svcs_cap) {
+    pthread_mutex_lock(&g_ipc_stat_lock);
+    if (svc_misses_out) *svc_misses_out = g_ipc_svc_misses;
+    if (stub_cmds_out) *stub_cmds_out = g_ipc_stub_cmds;
+    if (am_cmds_out) *am_cmds_out = g_ipc_am_unhandled;
+    if (svcs_buf && svcs_cap) {
+        svcs_buf[0] = 0;
+        size_t pos = 0;
+        for (int i = 0; i < g_ipc_unhandled_svc_n && pos + 2 < svcs_cap; i++) {
+            int w = snprintf(svcs_buf + pos, svcs_cap - pos, "%s%s(%u)", i ? "," : "",
+                             g_ipc_unhandled_svcs[i].name, g_ipc_unhandled_svcs[i].count);
+            if (w <= 0) break;
+            pos += (size_t)w < svcs_cap - pos ? (size_t)w : svcs_cap - pos - 1;
+        }
+        if (!svcs_buf[0]) snprintf(svcs_buf, svcs_cap, "none");
+    }
+    pthread_mutex_unlock(&g_ipc_stat_lock);
+}
+
 static void stub_handler(Service *s, IpcReq *req, IpcResp *resp) {
+    pthread_mutex_lock(&g_ipc_stat_lock);
+    g_ipc_stub_cmds++;
+    pthread_mutex_unlock(&g_ipc_stat_lock);
     LOG("[ipc] STUB %s cmd %u (in %u bytes, x%d a%d b%d c%d) -> ok\n", s->name, req->cmd, req->data_size, req->nx,
         req->na, req->nb, req->nc);
     resp->result = 0;
@@ -36,6 +90,18 @@ Service *service_lookup(const char *name) {
     __asm__("" : "+r"(start), "+r"(stop));  // separate objects: keep the compiler from reasoning about them
     for (const ServiceDef *d = start; d < stop; d++)
         if (d->name && !strcmp(d->name, name)) return service_new(name, d->handler, NULL);
+    pthread_mutex_lock(&g_ipc_stat_lock);
+    g_ipc_svc_misses++;
+    int idx = -1;
+    for (int i = 0; i < g_ipc_unhandled_svc_n; i++) {
+        if (!strcmp(g_ipc_unhandled_svcs[i].name, name)) { idx = i; break; }
+    }
+    if (idx < 0 && g_ipc_unhandled_svc_n < 32) {
+        idx = g_ipc_unhandled_svc_n++;
+        snprintf(g_ipc_unhandled_svcs[idx].name, sizeof g_ipc_unhandled_svcs[idx].name, "%s", name);
+    }
+    if (idx >= 0) g_ipc_unhandled_svcs[idx].count++;
+    pthread_mutex_unlock(&g_ipc_stat_lock);
     LOG("[ipc] no HLE implementation for service '%s', using logging stub\n", name);
     return service_new(name, stub_handler, NULL);
 }

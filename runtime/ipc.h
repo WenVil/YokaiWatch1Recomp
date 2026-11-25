@@ -73,6 +73,9 @@ static inline IpcBuf *in_buf(IpcReq *req, int i) {
 Service *service_new(const char *name, ServiceHandler h, void *state);
 Service *service_lookup(const char *name);  // from the registry (services/*.c)
 void ipc_return_object(IpcResp *resp, Service *s);
+void ipc_note_unhandled_iface(const char *iface, uint32_t cmd);
+void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out, uint64_t *am_cmds_out,
+                       char *svcs_buf, size_t svcs_cap);
 
 typedef struct { const char *name; ServiceHandler handler; } ServiceDef;
 #ifdef __APPLE__

@@ -297,6 +297,7 @@ static void cli_progress(double frac, const char *step) {
     static char last_step[128] = "";
     if (frac < 0.0) frac = 0.0;
     if (frac > 1.0) frac = 1.0;
+    if (last_frac >= 0.0 && frac < last_frac) frac = last_frac;
     const char *s = (step && *step) ? step : "";
     double diff = frac - last_frac;
     if (diff < 0.0) diff = -diff;
@@ -351,12 +352,12 @@ static int run_build_only(const char *root) {
         }
     }
     cli_progress(0.0, "Validating game files...");
-    if (gamelib_present(root)) {
+    char cache_buf[1100], why[512] = "";
+    const char *cache_dir = gamebuild_cache_dir(root, cache_buf, sizeof cache_buf);
+    if (gamelib_present_in(cache_dir, root)) {
         cli_progress(1.0, "Already built");
         return 0;
     }
-    char cache_buf[1100], why[512] = "";
-    const char *cache_dir = gamebuild_cache_dir(root, cache_buf, sizeof cache_buf);
     int jobs = plat_cpu_count();
     if (jobs < 1) jobs = 4;
     if (jobs > 16) jobs = 16;

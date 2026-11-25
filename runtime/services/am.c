@@ -37,7 +37,7 @@ static uint32_t new_event(void) {
     return r;
 }
 
-#define UNHANDLED(iface) LOG("[am] %s cmd %u (unhandled, ok)\n", iface, req->cmd)
+#define UNHANDLED(iface) do { ipc_note_unhandled_iface(iface, req->cmd); LOG("[am] %s cmd %u (unhandled, ok)\n", iface, req->cmd); } while (0)
 
 static void common_state_getter(Service *s, IpcReq *req, IpcResp *resp) {
     (void)s;

@@ -68,6 +68,8 @@ bool gamelib_load(const char *game_dir, char *why, size_t why_size);
 const GameLibTables *gamelib_tables(void);
 // True when a library usable with this build is in one of those places (without loading it).
 bool gamelib_present(const char *game_dir);
+// True when a library usable with this build is already in `dir` (without falling back to exe-adjacent builds).
+bool gamelib_present_in(const char *dir, const char *game_dir);
 
 #ifdef __cplusplus
 }

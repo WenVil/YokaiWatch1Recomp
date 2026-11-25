@@ -162,6 +162,7 @@ void gl_backend_clear_window(void) {}
 void gl_backend_quit(void) {
     if (atomic_flag_test_and_set(&s_quit_once)) return;
     atomic_store_explicit(&s_quitting, true, memory_order_release);
+    input_shutdown();
     gl_hle_log_summary();
 }
 
@@ -220,14 +221,19 @@ void gl_backend_swap_buffers(void) {
         LOG("[gl] eglSwapBuffers frame=%llu\n", (unsigned long long)frame);
     }
     gl_hle_check_post_swap_errors(frame);
-    if (frame == 10 || frame % 120 == 0) gl_hle_log_summary();
     if (frame_should_dump(frame)) dump_frame_bmp(frame);
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(s_window, &pw, &ph);
     gl_hle_blit_virtual_fbo(pw, ph);
     SDL_GL_SwapWindow(s_window);
-    extern void input_frame(uint64_t frame);
     input_frame(frame);
+    if (input_should_stop(frame)) {
+        LOG("[replay] graceful stop at frame=%llu\n", (unsigned long long)frame);
+        gl_backend_quit();
+        fflush(stdout);
+        fflush(stderr);
+        exit(0);
+    }
 }
 
 int gl_backend_run(void) {

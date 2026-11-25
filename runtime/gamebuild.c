@@ -12,6 +12,7 @@
 #include <signal.h>
 #endif
 
+#include "game_addresses.h"
 #include "gamelib.h"
 #include "paths.h"
 #include "platform.h"
@@ -150,15 +151,23 @@ static bool file_exists(const char *p) {
 static bool find_tools(Tools *t) {
     memset(t, 0, sizeof *t);
     const char *e = getenv("LARECOMP_GEN");
-    if (e && *e) snprintf(t->gen, sizeof t->gen, "%s", e);
-    else if (!rt_resource("lasgen" SEP "lasgen" PLAT_EXE_SUFFIX, NULL, t->gen, sizeof t->gen) &&
-             !(rt_resource(NULL, "tools/" PLAT_VENV_PYTHON, t->gen, sizeof t->gen) &&
-               rt_resource(NULL, "tools/gen.py", t->gen_script, sizeof t->gen_script)))
+    if (e && *e) {
+        snprintf(t->gen, sizeof t->gen, "%s", e);
+        const char *es = getenv("LARECOMP_GEN_SCRIPT");
+        if (es && *es) snprintf(t->gen_script, sizeof t->gen_script, "%s", es);
+    } else if (rt_resource(NULL, "tools/" PLAT_VENV_PYTHON, t->gen, sizeof t->gen) &&
+               rt_resource(NULL, "tools/gen.py", t->gen_script, sizeof t->gen_script)) {
+        /* Prefer live repo tools/venv + tools/gen.py over any frozen lasgen binary. */
+    } else if (!rt_resource("lasgen" SEP "lasgen" PLAT_EXE_SUFFIX, NULL, t->gen, sizeof t->gen)) {
         return false;
+    }
     e = getenv("LARECOMP_CC");
     if (e && *e) snprintf(t->cc, sizeof t->cc, "%s", e);
     else if (rt_resource("zig" SEP "zig" PLAT_EXE_SUFFIX, NULL, t->cc, sizeof t->cc)) t->zig = true;
-#ifndef _WIN32
+#ifdef _WIN32
+    else if (SearchPathA(NULL, "clang.exe", NULL, sizeof t->cc, t->cc, NULL) > 0) {}
+    else if (file_exists("C:\\msys64\\ucrt64\\bin\\clang.exe")) snprintf(t->cc, sizeof t->cc, "C:\\msys64\\ucrt64\\bin\\clang.exe");
+#else
     else if (rt_dev_mode() && file_exists("/usr/bin/clang")) snprintf(t->cc, sizeof t->cc, "/usr/bin/clang");
 #endif
     else return false;
@@ -332,7 +341,7 @@ static void add_cflags(Args *a, const Tools *t, bool opt_o0) {
             add(a, f);
         }
     }
-    if (t->zig) add(a, "-g0");
+    add(a, "-g0");
     if (opt_o0) {
         if (!saw_opt) add(a, "-O0");
         add(a, "-fno-sanitize=all");
@@ -358,7 +367,7 @@ static bool compute_full_id_in_exefs(const char *exefs_dir, char *out, size_t si
 static PlatProc start_compile(const Tools *t, const Unit *u, bool no_subsdk0) {
     Args a = {0};
     compiler(&a, t);
-    bool opt_o0 = t->zig && u->bytes > GB_MEGA_O0_BYTES;
+    bool opt_o0 = u->bytes > GB_MEGA_O0_BYTES;
     if (opt_o0) {
         fprintf(stderr, "gamebuild: %s (%llu bytes) exceeds %llu bytes; using -O0 -g0 -fno-sanitize=all\n",
                 u->src, (unsigned long long)u->bytes, (unsigned long long)GB_MEGA_O0_BYTES);
@@ -413,10 +422,12 @@ bool gamebuild_run_into(const char *game_dir, const char *cache_dir, const GameB
     snprintf(work, sizeof work, "%s" SEP ".gamebuild", effective_cache);
     snprintf(tmp, sizeof tmp, "%s" SEP "%s.tmp", work, out_lib);
     char input_paths[7][1100], spec[4096];
+    const GameVersion *gv = game_version_of(game_dir);
+    bool is_yw1 = gv && !strncmp(gv->key, "vyw1_", 5);
     snprintf(input_paths[0], sizeof input_paths[0], "%s" SEP "main", exefs_dir);
     snprintf(input_paths[1], sizeof input_paths[1], "%s" SEP "sdk", exefs_dir);
     snprintf(input_paths[2], sizeof input_paths[2], "%s" SEP "subsdk0", exefs_dir);
-    bool has_subsdk0 = build_cache_file_exists(input_paths[2]);
+    bool has_subsdk0 = !is_yw1 && build_cache_file_exists(input_paths[2]);
     int nmods = has_subsdk0 ? 3 : 2;
     const char *headers[] = {"cpu.h", "simd.h", "simd_fp.h", "gamelib.h"};
     for (int i = 0; i < 4; ++i) snprintf(input_paths[i + 3], sizeof input_paths[i + 3], "%s" SEP "%s", t.inc, headers[i]);
@@ -424,10 +435,14 @@ bool gamebuild_run_into(const char *game_dir, const char *cache_dir, const GameB
     // Compiler/header/flag changes invalidate every object; entry always rebuilds because it embeds the library id.
     const char *inputs[] = {input_paths[3], input_paths[4], input_paths[5], input_paths[6], t.cc};
     // The compiler's contents identify it, so relocating the app does not discard reusable objects.
-    snprintf(spec, sizeof spec, "LASBUILD3\n%s\n%s\n%s\nzig=%d pointer=%d g0=%d mega_o0=%llu%s%s\n",
-             GAMELIB_BASE_ID, GAMELIB_CFLAGS, GAMELIB_SHARED, t.zig, (int)sizeof(void *), t.zig ? 1 : 0,
+    snprintf(spec, sizeof spec, "LASBUILD3\n%s\n%s\n%s\nzig=%d pointer=%d g0=1 mods=%d mega_o0=%llu%s%s\n",
+             GAMELIB_BASE_ID, GAMELIB_CFLAGS, GAMELIB_SHARED, t.zig, (int)sizeof(void *), nmods,
              (unsigned long long)GB_MEGA_O0_BYTES,  // (+ the Linux zig target: objects from
              t.zig && ZIG_TARGET[0] ? " target=" : "", t.zig ? ZIG_TARGET : "");  // before it are rebuilt once)
+    if (is_yw1) {
+        LOG("[gamebuild] target %s (OpenGL mode): building 2 modules (main + sdk), skipping subsdk0/subsdk1, passing -DNO_SUBSDK0\n",
+            gv->key);
+    }
     if (o->progress) o->progress(0, "Checking completed build files...");
     bool resuming = build_cache_resumable(effective_cache);  // (a cancelled or interrupted build; read before open marks this one)
     BuildCache *cache = build_cache_open(effective_cache, spec, inputs, 5, why, why_size);
@@ -643,6 +658,15 @@ bool gamebuild_run_into(const char *game_dir, const char *cache_dir, const GameB
         {
             compiler(&a, &t);
             add_split(&a, GAMELIB_SHARED);
+#ifdef _WIN32
+            if (!t.zig) {
+                char lld[1100];
+                if (SearchPathA(NULL, "ld.lld.exe", NULL, sizeof lld, lld, NULL) > 0 ||
+                    file_exists("C:\\msys64\\ucrt64\\bin\\ld.lld.exe")) {
+                    add(&a, "-fuse-ld=lld");
+                }
+            }
+#endif
             add(&a, "-o");
             add(&a, tmp);
             add(&a, at);

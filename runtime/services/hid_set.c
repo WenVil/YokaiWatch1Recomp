@@ -21,6 +21,7 @@ static uint64_t touch_sampling;
 static uint64_t touch_slot_tail;
 static bool touch_was_down;
 static int32_t touch_last_x, touch_last_y;
+static uint64_t g_vib_single_calls, g_vib_batch_calls;
 
 // RingLifo<TouchScreenState<16>, 16> at g_hid_shmem + 0x400 (verified against YW1 sdk 0x34ab38 / 0x34b370).
 // Header: +0x00 timestamp, +0x08 buffer_count(17), +0x10 tail, +0x18 count.
@@ -85,9 +86,24 @@ void hid_touch_write(bool down, int x, int y) {
             push_touch_sample_locked(base, 0, 0, 0, 0);
             LOG("[hid] touch up (%d, %d)\n", touch_last_x, touch_last_y);
             touch_was_down = false;
+            touch_last_x = 0;
+            touch_last_y = 0;
         }
     }
     pthread_mutex_unlock(&hid_touch_lock);
+}
+
+void hid_touch_get_state(bool *down, int *x, int *y) {
+    pthread_mutex_lock(&hid_touch_lock);
+    if (down) *down = touch_was_down;
+    if (x) *x = touch_was_down ? touch_last_x : 0;
+    if (y) *y = touch_was_down ? touch_last_y : 0;
+    pthread_mutex_unlock(&hid_touch_lock);
+}
+
+void hid_vibration_counts(uint64_t *single_out, uint64_t *batch_out) {
+    if (single_out) *single_out = __atomic_load_n(&g_vib_single_calls, __ATOMIC_RELAXED);
+    if (batch_out) *batch_out = __atomic_load_n(&g_vib_batch_calls, __ATOMIC_RELAXED);
 }
 
 RT_ON_RESET(hid_reset) {
@@ -97,7 +113,11 @@ RT_ON_RESET(hid_reset) {
     touch_sampling = 0;
     touch_slot_tail = 0;
     touch_was_down = false;
+    touch_last_x = 0;
+    touch_last_y = 0;
     pthread_mutex_unlock(&hid_touch_lock);
+    __atomic_store_n(&g_vib_single_calls, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_vib_batch_calls, 0, __ATOMIC_RELAXED);
 }
 
 static void applet_resource(Service *s, IpcReq *req, IpcResp *resp) {
@@ -117,6 +137,7 @@ SERVICE("hid", hid) {
     case 121: OUT(int64_t, 0) = 0; resp_size(resp, 8); break;      // GetNpadJoyHoldType
     case 129: OUT(int64_t, 0) = 0; resp_size(resp, 8); break;      // GetNpadHandheldActivationMode
     case 201: {  // SendVibrationValue: handle, four floats, padding, ARUID
+        __atomic_add_fetch(&g_vib_single_calls, 1, __ATOMIC_RELAXED);
         if (req->data_size < 32) { resp->result = 0xD401; break; }
         uint32_t h; RumbleValue v;
         memcpy(&h, req->data, sizeof h);
@@ -138,6 +159,7 @@ SERVICE("hid", hid) {
         OUT(uint8_t, 0) = req->data_size >= 4 && rumble_side(IN(uint32_t, 0)) >= 0;
         resp_size(resp, 1); break;
     case 206: {  // SendVibrationValues: parallel handle/value pointer buffers
+        __atomic_add_fetch(&g_vib_batch_calls, 1, __ATOMIC_RELAXED);
         IpcBuf *handles = in_buf(req, 0), *values = in_buf(req, 1);
         if (!handles || !values || handles->size % 4 || values->size % sizeof(RumbleValue) ||
             handles->size / 4 != values->size / sizeof(RumbleValue) ||
