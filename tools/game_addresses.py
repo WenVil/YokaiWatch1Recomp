@@ -78,7 +78,7 @@ def select_version(key):
     if key not in VERSIONS:
         raise UnknownGameVersion(f'Unknown game version {key}')
     ADDRESS.__dict__.clear()
-    if not key.startswith('v13_'):
+    if not key.startswith(('v13_', 'vyw1_')):
         ADDRESS.__dict__.update(load_table(table_path(key)))
     SELECTED = key
     return key

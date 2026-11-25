@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include "hle.h"
+#include "game_addresses.h"
 #include "kernel.h"
 #ifdef _WIN32
 #include "platform/windows_threads.h"
@@ -754,7 +755,10 @@ static void probe_check(Cpu *c, uint32_t imm) {
     // main+0x10e23a8, pool at manager+0x3a8: cursor +0x20, end +0x30, capacity u32 +0x10). A leak shows as a cursor
     // that only grows; the crash (f_70002f9c80 with a NULL object) is this pool refusing a 0x200-byte request.
     static int probe_pool = -1;
-    if (probe_pool < 0) probe_pool = ENV("LARECOMP_PROBE_POOL") != NULL;
+    if (probe_pool < 0) {
+        const GameVersion *gv = game_version();
+        probe_pool = (gv && !strncmp(gv->key, "v13_", 4)) && ENV("LARECOMP_PROBE_POOL") != NULL;
+    }
     if (probe_pool) {
         static uint64_t n;
         if ((__atomic_fetch_add(&n, 1, __ATOMIC_RELAXED) & 0x3ff) == 0) {

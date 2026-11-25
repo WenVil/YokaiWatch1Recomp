@@ -147,7 +147,7 @@ $(B)/obj/%.o: $(GEN)/%.c runtime/cpu.h runtime/simd.h runtime/simd_fp.h
 
 $(B)/obj/tools/gamelib_entry.o: tools/gamelib_entry.c $(GAMELIB_SRCS) $(wildcard $(GEN)/main/main_build_id.txt)
 	@mkdir -p $(dir $@)
-	$(CC) $(GENFLAGS) -DGAMELIB_ID='"$(GAMELIB_FULL_ID)"' -c $< -o $@
+	$(CC) $(GENFLAGS) -DGAMELIB_ID='"$(GAMELIB_FULL_ID)"' $(if $(wildcard $(GEN)/subsdk0/*.c),,-DNO_SUBSDK0) -c $< -o $@
 $(B)/rt/gamelib.o: $(GAMELIB_SRCS)
 $(B)/rt/gamelib.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"'
 # the start screen's build of it (runtime/gamebuild.c) uses the same flags
@@ -222,10 +222,11 @@ $(B)/imgui/imgui_impl_metal.o: $(IMGUI)/backends/imgui_impl_metal.mm
 
 # Python: tools/venv (macOS, Linux: bin/python, Windows: Scripts/python.exe)
 PY := $(firstword $(wildcard tools/venv/bin/python) $(wildcard tools/venv/Scripts/python.exe))
+EXEFS ?= extracted/exefs
 
 gen:
-	cd tools && ../$(PY) gen.py sdk ../extracted/exefs/sdk 0x7004000000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt $(GENSIMD)
-	cd tools && ../$(PY) gen.py main ../extracted/exefs/main 0x7000000000 ../$(GEN)/main $(GENSIMD)
+	cd tools && ../$(PY) gen.py sdk "$(abspath $(EXEFS))/sdk" 0x7004000000 "$(abspath $(GEN))/sdk" --hle ../runtime/hle/hle_symbols.txt $(GENSIMD)
+	cd tools && ../$(PY) gen.py main "$(abspath $(EXEFS))/main" 0x7000000000 "$(abspath $(GEN))/main" $(GENSIMD)
 
 gen-objs: $(GEN_OBJ)
 

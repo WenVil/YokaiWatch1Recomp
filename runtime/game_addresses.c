@@ -29,6 +29,7 @@ static const GameAddrs ga_v13_us_v1_1_0 = {
 #include "game_addresses/patches_v1_0_0.h"
 #include "game_addresses/runtime_v1_0_0.h"
 };
+static const GameAddrs ga_vyw1_jp_v1_3_0 = {0};
 #undef GA_ADDR
 
 static const GameVersion versions[] = {

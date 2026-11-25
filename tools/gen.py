@@ -550,7 +550,7 @@ class Module:
         all_labels = any(v == 'all' for v in tables.values())
         if all_labels:
             labels = set(range(entry, end, 4))
-        rando_here = [a for a in range(entry, end, 4) if a - self.base in RANDO_CODE]
+        rando_here = [] if generic_mode else [a for a in range(entry, end, 4) if a - self.base in RANDO_CODE]
         if rando_here:
             labels = set(labels)
             for a in rando_here:
@@ -899,7 +899,7 @@ def main():
     ap.add_argument('--chunk-bytes', type=int, default=1500000)  # and about this much C (even compile times)
     ap.add_argument('--big-fn', type=int, default=100000)  # bytes of C from which a function gets its own file
     ap.add_argument('--limit', type=int, default=0)
-    ap.add_argument('--generic', action='store_true', help='Route A generic codegen (auto-enabled for v13_*)')
+    ap.add_argument('--generic', action='store_true', help='Route A generic codegen (auto-enabled for v13_*, vyw1_*)')
     ap.add_argument('--simd', choices=('asm', 'c'),
                     default='asm' if platform.machine().lower() in ('arm64', 'aarch64') else 'c')
     args = ap.parse_args()
@@ -908,18 +908,18 @@ def main():
     m = Module(args.name, args.nso, args.base, args.simd)
     version = None
     generic_mode = args.generic or (args.name != 'main')
+    global HOOKS, PATCHES, RANDO_CODE
     if args.name == 'main':
-        global HOOKS, PATCHES
         import game_addresses
         try:
             version = game_addresses.select_build_id(m.nso.build_id)
         except game_addresses.UnknownGameVersion as e:
             if not args.generic:
                 sys.exit(f'{args.name}: {e}')
-        if version and version.startswith('v13_'):
+        if version and version.startswith(('v13_', 'vyw1_')):
             generic_mode = True
         if generic_mode:
-            HOOKS, PATCHES = {}, {}
+            HOOKS, PATCHES, RANDO_CODE = {}, {}, {}
             lbl = game_addresses.VERSIONS[version][0] if version else 'generic'
             print(f'{args.name}: generic Route A generation for {lbl} (build {m.nso.build_id[:16]})', file=sys.stderr)
         else:
@@ -928,6 +928,7 @@ def main():
             label, build_id = game_addresses.VERSIONS[version]
             print(f'{args.name}: game version {label} (build {build_id[:16]}), address table {version}', file=sys.stderr)
     elif generic_mode:
+        HOOKS, PATCHES, RANDO_CODE = {}, {}, {}
         print(f'{args.name}: generic Route A generation (build {m.nso.build_id[:16]})', file=sys.stderr)
 
     ft_unwinds = m.detect_freetype_setjmp() if (args.name == 'main' and generic_mode) else {}
