@@ -2,11 +2,11 @@
   "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
   "format": 1,
   "name": "YokaiWatch1Recomp",
-  "repo": "YokaiWatch1Recomp",
+  "repo": "YokaiWatch1Recomp/YokaiWatch1Recomp",
   "inputs": [
     {
       "id": "game",
-      "label": "Your extracted copy of Yo-kai Watch 1 (Nintendo Switch JP v1.3.0): the folder containing exefs/main and romfs/yw1_a.fa.",
+      "label": "Your extracted copy of Yo-kai Watch 1 (Nintendo Switch, Title ID 0100C0000CEEA000; tested on v1.3.0, universal support for v1.0.0/v1.4.0+): the folder containing exefs/main and romfs/.",
       "role": "game",
       "formats": [
         {
@@ -15,7 +15,8 @@
       ],
       "check": {
         "file": "exefs/main"
-      }
+      },
+      "optional": false
     }
   ],
   "start": {
@@ -46,7 +47,8 @@
     ],
     "env": {
       "LARECOMP_DATA_ROOT": "{data}"
-    }
+    },
+    "keeps_copy": false
   },
   "config": [
     {
@@ -59,7 +61,7 @@
       ],
       "game_path": "game_dir",
       "new": {
-        "game_lang": "ja",
+        "game_lang": "auto",
         "background_input": "0"
       }
     }
@@ -81,6 +83,11 @@
     "data": [
       {
         "path": "{data}"
+      }
+    ],
+    "mods": [
+      {
+        "path": "{data}/mods"
       }
     ]
   },
@@ -127,7 +134,9 @@
       "defaults": {
         "window_mode": "windowed",
         "fullscreen": "0"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "output_res",
@@ -168,7 +177,9 @@
       ],
       "defaults": {
         "output_res": "auto"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "aspect_mode",
@@ -191,7 +202,9 @@
       ],
       "defaults": {
         "aspect_mode": "16:9"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "vsync_mode",
@@ -220,118 +233,77 @@
       ],
       "defaults": {
         "vsync_mode": "mailbox"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
-      "id": "resolution",
-      "label": "Internal resolution",
+      "id": "res_scale",
+      "label": "Internal resolution scale",
       "group": "Display",
-      "help": "Internal 3D rendering scale relative to the Switch's 1080p output. Higher values sharpen 3D scenes at greater GPU cost.",
+      "help": "Internal OpenGL 3D framebuffer scale relative to the Switch 1080p render target. Higher scales sharpen 3D geometry.",
       "choices": [
-        {
-          "label": "Auto",
-          "set": {
-            "resolution": "auto"
-          }
-        },
-        {
-          "label": "Match display",
-          "set": {
-            "resolution": "match"
-          }
-        },
         {
           "label": "1x (1080p)",
           "set": {
-            "resolution": "1x"
+            "res_scale": "1x"
+          }
+        },
+        {
+          "label": "1.5x (1620p)",
+          "set": {
+            "res_scale": "1.5x"
+          }
+        },
+        {
+          "label": "2x (4K 2160p)",
+          "set": {
+            "res_scale": "2x"
+          }
+        }
+      ],
+      "defaults": {
+        "res_scale": "1x"
+      },
+      "in": "main",
+      "advanced": false
+    },
+    {
+      "id": "game_speed",
+      "label": "Game speed",
+      "group": "Display",
+      "help": "Adjusts real-time game speed multiplier (1.0x to 3.0x; F3 cycles in-game).",
+      "choices": [
+        {
+          "label": "1.0x (Normal)",
+          "set": {
+            "game_speed": "1.0x"
           }
         },
         {
           "label": "1.5x",
           "set": {
-            "resolution": "1.5x"
+            "game_speed": "1.5x"
           }
         },
         {
-          "label": "2x (4K)",
+          "label": "2.0x",
           "set": {
-            "resolution": "2x"
+            "game_speed": "2.0x"
           }
         },
         {
-          "label": "Dynamic",
+          "label": "3.0x",
           "set": {
-            "resolution": "dynamic"
-          }
-        },
-        {
-          "label": "75%",
-          "set": {
-            "resolution": "75%"
-          }
-        },
-        {
-          "label": "50%",
-          "set": {
-            "resolution": "50%"
+            "game_speed": "3.0x"
           }
         }
       ],
       "defaults": {
-        "resolution": "auto"
-      }
-    },
-    {
-      "id": "upscaler",
-      "label": "Upscaling",
-      "group": "Display",
-      "help": "How a lower internal resolution scales up to the window. AMD FSR 1 sharpens edges; Auto picks per GPU.",
-      "choices": [
-        {
-          "label": "Auto",
-          "set": {
-            "upscaler": "auto"
-          }
-        },
-        {
-          "label": "AMD FSR 1",
-          "set": {
-            "upscaler": "fsr1"
-          }
-        },
-        {
-          "label": "Bilinear",
-          "set": {
-            "upscaler": "bilinear"
-          }
-        }
-      ],
-      "defaults": {
-        "upscaler": "auto"
-      }
-    },
-    {
-      "id": "antialias",
-      "label": "Anti-aliasing",
-      "group": "Display",
-      "help": "Applies SMAA edge smoothing before scaling to the window.",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "antialias": "off"
-          }
-        },
-        {
-          "label": "SMAA",
-          "set": {
-            "antialias": "smaa"
-          }
-        }
-      ],
-      "defaults": {
-        "antialias": "off"
-      }
+        "game_speed": "1.0x"
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "hud_mode",
@@ -364,7 +336,34 @@
       "defaults": {
         "hud_mode": "off",
         "show_fps": "0"
-      }
+      },
+      "in": "main",
+      "advanced": false
+    },
+    {
+      "id": "mods_enabled",
+      "label": "Mods (LayeredFS)",
+      "group": "Advanced",
+      "help": "Enables RomFS/ExeFS mod overrides loaded from the mods/ folder.",
+      "choices": [
+        {
+          "label": "On",
+          "set": {
+            "mods_enabled": "1"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "mods_enabled": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "mods_enabled": "1"
+      },
+      "in": "main",
+      "advanced": true
     },
     {
       "id": "volume",
@@ -380,7 +379,9 @@
       },
       "defaults": {
         "volume": "1.00"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "mute_unfocused",
@@ -403,7 +404,9 @@
       ],
       "defaults": {
         "mute_unfocused": "0"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "audio_channels",
@@ -432,7 +435,9 @@
       ],
       "defaults": {
         "audio_channels": "auto"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "ui_lang",
@@ -479,7 +484,9 @@
       ],
       "defaults": {
         "ui_lang": "auto"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "game_lang",
@@ -549,14 +556,16 @@
         }
       ],
       "defaults": {
-        "game_lang": "zh-Hans"
-      }
+        "game_lang": "auto"
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "pad_layout",
       "label": "Controller layout",
       "group": "Controls",
-      "help": "Chooses Nintendo Switch physical positions or Xbox letter positions for face buttons and overlay navigation.",
+      "help": "Maps host controller buttons between Nintendo Switch physical layout and Xbox letter layout (also sets overlay navigation). Note: maps controller layout only and does not replace in-game Switch button icons.",
       "choices": [
         {
           "label": "Nintendo",
@@ -565,7 +574,7 @@
           }
         },
         {
-          "label": "Xbox",
+          "label": "Xbox (layout only; in-game icons remain Switch)",
           "set": {
             "pad_layout": "xbox"
           }
@@ -573,7 +582,9 @@
       ],
       "defaults": {
         "pad_layout": "nintendo"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "rumble",
@@ -596,7 +607,9 @@
       ],
       "defaults": {
         "rumble": "1"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "rumble_strength",
@@ -616,7 +629,9 @@
       "defaults": {
         "rumble_strength": "100",
         "rumble": "1"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "background_input",
@@ -639,7 +654,9 @@
       ],
       "defaults": {
         "background_input": "1"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "ls_deadzone",
@@ -655,7 +672,9 @@
       },
       "defaults": {
         "ls_deadzone": "12"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "rs_deadzone",
@@ -671,7 +690,9 @@
       },
       "defaults": {
         "rs_deadzone": "12"
-      }
+      },
+      "in": "main",
+      "advanced": false
     },
     {
       "id": "trigger_threshold",
@@ -687,7 +708,9 @@
       },
       "defaults": {
         "trigger_threshold": "50"
-      }
+      },
+      "in": "main",
+      "advanced": false
     }
   ],
   "actions": [
@@ -696,6 +719,12 @@
       "label": "Saves",
       "help": "Your Switch save folder (save/save_0/).",
       "open": "saves"
+    },
+    {
+      "id": "mods",
+      "label": "Mods",
+      "help": "LayeredFS mod root (place mod folders inside mods/<mod_name>/romfs/).",
+      "open": "mods"
     },
     {
       "id": "logs",

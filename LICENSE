@@ -1,7 +1,7 @@
 MIT License
 
 Copyright (c) 2026 Peiikai (upstream LASRecomp)
-Copyright (c) 2026 13SentinelsRecomp Contributors
+Copyright (c) 2026 YokaiWatch1Recomp Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Scope notice: This license applies only to the source code authored in
-13SentinelsRecomp and upstream LASRecomp. It does not cover any copyrighted
-game code, assets, fonts, firmware, or keys from 13 Sentinels: Aegis Rim
-(Vanillaware / ATLUS / SEGA) or Nintendo, nor third-party dependencies listed
+YokaiWatch1Recomp and upstream LASRecomp. It does not cover any copyrighted
+game code, assets, fonts, firmware, or keys from Yo-kai Watch 1
+(LEVEL-5 Inc.) or Nintendo, nor third-party dependencies listed
 in THIRD_PARTY_LICENSES.md, which remain under their respective licenses.

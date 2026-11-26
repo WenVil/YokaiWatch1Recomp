@@ -12,10 +12,13 @@ build/
 /cache/
 save/
 /larecomp.ini
-/13sentinels.ini
+/yokaiwatch1.ini
 /save_backups/
+/yw1game*.dll
+/yw1game*.dll.id
 /lasgame*.dll
 /lasgame*.dll.id
+/mods/
 /.gamebuild/
 /gamecontrollerdb.txt
 # tools and Python environments (machine-specific)

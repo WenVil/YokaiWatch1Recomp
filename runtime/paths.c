@@ -163,7 +163,7 @@ bool rt_dev_mode(void) { return g_dev; }
 #define MARK_PARTIAL ".lasrecomp_incomplete"    // in a move's destination until its copy was checked
 // What a data folder holds (and a move takes along). Logs stay where they are.
 static const char *const DATA_ENTRIES[] = {"save", "save_backups", "yokaiwatch1.ini",
-                                           "larecomp.ini", "fonts", "gamecontrollerdb.txt", "cache", "extracted"};
+                                           "larecomp.ini", "fonts", "gamecontrollerdb.txt", "cache", "extracted", "mods"};
 #define N_ENTRIES (sizeof DATA_ENTRIES / sizeof *DATA_ENTRIES)
 static char g_home[1024];  // the platform's folder (where POINTER_FILE lives)
 
@@ -272,9 +272,23 @@ static bool pointer_root(const char *home, char *out, size_t n) {
     return true;
 }
 
-bool rt_data_root_early(char *out, size_t n) {
+static const char *env_data_root(const char **var_name) {
     const char *env = getenv("LARECOMP_DATA_ROOT");
-    if (env && *env) return (size_t)snprintf(out, n, "%s", env) < n;
+    if (env && *env) {
+        if (var_name) *var_name = "LARECOMP_DATA_ROOT";
+        return env;
+    }
+    env = getenv("RECOMPLAUNCHER_DATA");
+    if (env && *env) {
+        if (var_name) *var_name = "RECOMPLAUNCHER_DATA";
+        return env;
+    }
+    return NULL;
+}
+
+bool rt_data_root_early(char *out, size_t n) {
+    const char *env = env_data_root(NULL);
+    if (env) return (size_t)snprintf(out, n, "%s", env) < n;
     if (is_dir("extracted")) return false;  // (dev mode)
     char home[1024];
     default_home(home, sizeof home);
@@ -363,8 +377,8 @@ void rt_paths_init(void) {
     exe_dir(g_exe_dir, sizeof g_exe_dir);
     default_home(g_home, sizeof g_home);
     char root[1024];
-    const char *env = getenv("LARECOMP_DATA_ROOT");
-    if (env && *env) snprintf(root, sizeof root, "%s", env);
+    const char *env = env_data_root(NULL);
+    if (env) snprintf(root, sizeof root, "%s", env);
     else if (is_dir("extracted")) snprintf(root, sizeof root, "%s", g_start), g_dev = true;  // dev / portable: as before
     else {
         snprintf(root, sizeof root, "%s", g_home);
@@ -544,8 +558,10 @@ unsigned long long rt_game_files_size(const char *game_dir) {
 
 // ---- choosing another data folder, moving the data there (the start screen: runtime/ui/launcher.mm)
 const char *rt_data_root_fixed(void) {
-    const char *env = getenv("LARECOMP_DATA_ROOT");
-    if (env && *env) return "Set by LARECOMP_DATA_ROOT.";
+    const char *which = NULL;
+    if (env_data_root(&which)) {
+        return !strcmp(which, "RECOMPLAUNCHER_DATA") ? "Set by RECOMPLAUNCHER_DATA." : "Set by LARECOMP_DATA_ROOT.";
+    }
     if (g_dev) return "A source checkout uses its own folder.";
     return NULL;
 }

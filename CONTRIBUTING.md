@@ -1,45 +1,38 @@
-# Contributing to 13SentinelsRecomp
+# Contributing to YokaiWatch1Recomp
 
-Thank you for your interest in contributing to **13SentinelsRecomp**.
+Thank you for your interest in contributing to **YokaiWatch1Recomp**.
 
 ---
 
 ## Reporting Issues
 
-- **Report issues here, not upstream**: Although 13SentinelsRecomp is derived from `peiikai/LASRecomp`, please **do not** file issues or ask for support on `peiikai/LASRecomp`. Report all *13 Sentinels: Aegis Rim* compatibility, build, or runtime bugs in this repository.
-- When opening an issue, please include:
-  - Your OS version, CPU model, GPU model, and Vulkan graphics driver version.
-  - Game region and version (`Asia v1.00`, `US/EU v1.10`, or `US/EU v1.00`).
-  - Clear steps to reproduce the problem.
-  - The runtime log file (`13sentinelsrecomp.log` located next to `13SentinelsRecomp.exe`).
+- **Report issues here, not upstream**: Although `YokaiWatch1Recomp` is derived from `peiikai/LASRecomp`, please **do not** file issues or ask for support on `peiikai/LASRecomp`. Report all *Yo-kai Watch 1* compatibility, OpenGL rendering, build, or runtime bugs solely in this repository.
+- When filing a bug report, please include:
+  - Your Windows version, CPU model, GPU model, and OpenGL graphics driver version.
+  - Your game version / Title ID (`0100C0000CEEA000`) and Main Build ID (`B6E172353E696E65`, etc.), plus any active mods under `mods/`.
+  - A description of the issue and steps to reproduce.
+  - The runtime log file (`yokaiwatch1recomp.log` next to `YokaiWatch1Recomp.exe`) and whether custom settings in `yokaiwatch1.ini` were used.
 
 ---
 
-## Zero-Copyright & Legal Policy
+## Zero Copyright Policy (Strict)
 
-All contributions MUST follow the project's strict zero-copyright rules:
-
-- **Do NOT commit or upload** any Nintendo Switch game images (`.nsp`, `.xci`), NSO binaries (`main`, `sdk`, `subsdk0`, `rtld`), RomFS assets (`*.CPK`), game fonts, console firmware, decryption keys (`prod.keys`), or lifted/generated C source under `generated/`.
-- **Do NOT include** links, instructions, or utilities for acquiring copyrighted game files or `prod.keys`.
-- Recompilation tooling and runtime fixes must operate cleanly on user-supplied extracted `exefs/` and `romfs/` directories without bundling proprietary game data.
+- **Never commit, attach, or link copyrighted game assets.** This includes NSP/XCI dumps, decrypted Switch NSO executables (`main`, `rtld`, `sdk`, `subsdk*`), RomFS `.fa` archives, extracted game textures/audio/fonts, firmware files, save files, or `prod.keys`.
+- Any test fixtures, scripts, or screenshots added to commits must be synthetically generated or purely runtime telemetry without proprietary game data.
+- Keep `generated/` and `build/` out of version control (`.gitignore`).
 
 ---
 
-## Development Setup & Testing
+## Code & Documentation Guidelines
 
-- Supported primary build environment: **Windows 10/11 (x86-64) under MSYS2 UCRT64** — see [docs/BUILD-windows.md](docs/BUILD-windows.md).
-- Ensure Git preserves LF line endings (`core.autocrlf false`, `core.eol lf`) so shell build scripts under `tools/` work reliably in MSYS2.
-- Before submitting a pull request:
-  - Keep changes focused and modular, preserving existing code style and comments.
-  - Verify your build passes (`make -j8` or `make -j8 dist`) without compiler warnings in modified runtime code.
-  - Run relevant unit/regression tests under `tools/` (for example Python lifting/cache tests or runtime C tests) matching the subsystems you touched.
-  - Update `README.md`, `README_zh.md`, `recomplauncher.json`, or `docs/` if CLI flags, configuration keys (`13sentinels.ini`), or build steps change.
+- **0 GUARD Principle**: Never hand-edit outputs under `generated/`. All lifter fixes belong in `tools/gen.py` / `tools/lifter.py` / `tools/simd_c.py` and all HLE/GL/runtime behavior belongs in `runtime/`.
+- **Clean Runtime Separation**: Keep changes focused, readable, and modular; run unit tests (`tools/tests` and `Makefile` test targets) and verify `llvm-nm` detects zero `f_70*` symbols in `YokaiWatch1Recomp.exe`.
+- Update `README.md`, `README_zh.md`, `recomplauncher.json`, or `docs/` whenever CLI flags, `yokaiwatch1.ini` keys, or build steps change.
 
 ---
 
 ## Pull Request Process
 
 1. Fork the repository and branch from `main`.
-2. Make focused commits with clear descriptions of the motivation and testing performed.
-3. Confirm `git status` contains zero copyrighted assets, personal machine paths, or build artifacts (`build/`, `generated/`).
-4. Open a pull request against `main`.
+2. Ensure clean builds under Windows MSYS2 UCRT64 (`clang` + pure LGPL FFmpeg deps) with zero compiler warnings in touched files.
+3. Describe what changed, how it was tested, and confirm zero copyrighted material or `generated/` edits are included.

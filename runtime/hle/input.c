@@ -405,11 +405,21 @@ static void note_family(void) {
     if (f != pad_family) LOG("[input] button prompts: %s controller\n", f == 1 ? "Xbox" : f == 2 ? "PlayStation" : "Nintendo");
     pad_family = f;
 }
+static const char *env_pad_override(void) {
+    const char *e = getenv("LARECOMP_PAD_TYPE");
+    if (e && *e) return e;
+    e = getenv("RECOMPLAUNCHER_PAD");
+    return (e && *e) ? e : NULL;
+}
+
 int input_pad_family(void) {
     static int env = -2;
     if (env == -2) {
-        const char *e = getenv("LARECOMP_PAD_TYPE");
-        env = !e ? -1 : !strcmp(e, "xbox") ? 1 : !strcmp(e, "playstation") || !strcmp(e, "ps") ? 2 : 0;
+        const char *e = env_pad_override();
+        env = !e ? -1
+                 : !SDL_strcasecmp(e, "xbox") ? 1
+                 : (!SDL_strcasecmp(e, "playstation") || !SDL_strcasecmp(e, "ps")) ? 2
+                 : 0;
     }
     return env >= 0 ? env : pad_family;
 }
@@ -426,7 +436,7 @@ int input_menu_family(SDL_JoystickID which) {
     case PROMPTS_PLAYSTATION: return 2;
     default: break;
     }
-    if (getenv("LARECOMP_PAD_TYPE")) return input_pad_family();
+    if (env_pad_override()) return input_pad_family();
     if (which && SDL_IsGamepad(which)) return input_family_of_type(SDL_GetGamepadTypeForID(which));
     return bind_label_family();
 }

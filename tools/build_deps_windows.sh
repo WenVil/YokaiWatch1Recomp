@@ -13,7 +13,7 @@ P=$PWD/build/deps-win
 S=$P/src
 mkdir -p "$S"
 JOBS=$(nproc)
-NEUTRAL=/opt/las-recomp-deps  # (FFmpeg's --prefix: never used at run time, the DLLs sit next to the exe)
+NEUTRAL=/opt/yw1recomp-deps  # (FFmpeg's --prefix: never used at run time, the DLLs sit next to the exe)
 
 fetch() {  # url sha256 file
     [ -f "$S/$3" ] || curl -fsSL -o "$S/$3.part" "$1" && { [ -f "$S/$3" ] || mv "$S/$3.part" "$S/$3"; }

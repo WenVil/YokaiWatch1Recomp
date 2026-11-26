@@ -306,7 +306,7 @@ static const Entry k_table[STR_COUNT] = {
     {"取消构建", "取消構建", "Cancel Build", "構築キャンセル", "빌드 취소"},
     {"✓ 游戏代码模块本地构建完成！", "✓ 遊戲程式碼模組本地構建完成！", "✓ Game module built successfully!", "✓ ゲームモジュールの構築が完了しました！", "✓ 게임 모듈 빌드가 완료되었습니다!"},
     {"× 本地构建失败：", "× 本地構建失敗：", "× Local build failed: ", "× 構築に失敗しました: ", "× 로컬 빌드 실패: "},
-    {"× 本机构建工具链不完整（缺少 lasgen / zig / YokaiWatch1Recomp.dll.a）。请确认发布包完整。", "× 本機構建工具鏈不完整（缺少 lasgen / zig / YokaiWatch1Recomp.dll.a）。請確認發佈包完整。", "× Local build toolchain incomplete (missing lasgen / zig / YokaiWatch1Recomp.dll.a).", "× ビルドツールチェーンが見つかりません (lasgen / zig / implib)。", "× 로컬 빌드 도구가 누락되었습니다 (lasgen / zig / YokaiWatch1Recomp.dll.a)."},
+    {"× 本机构建工具链不完整（缺少 yw1gen / zig / YokaiWatch1Recomp.dll.a）。请确认发布包完整。", "× 本機構建工具鏈不完整（缺少 yw1gen / zig / YokaiWatch1Recomp.dll.a）。請確認發佈包完整。", "× Local build toolchain incomplete (missing yw1gen / zig / YokaiWatch1Recomp.dll.a).", "× ビルドツールチェーンが見つかりません (yw1gen / zig / implib)。", "× 로컬 빌드 도구가 누락되었습니다 (yw1gen / zig / YokaiWatch1Recomp.dll.a)."},
     {"提示：本发行包未内置 .nsp/.xci 解包器，请直接选择已解包的 exefs/romfs 文件夹。", "提示：本發佈包未內建 .nsp/.xci 解包器，請直接選擇已解包的 exefs/romfs 資料夾。", "Note: No package extractor is bundled; please select an already-extracted exefs/romfs folder.", "注: パッケージ展開ツールは同梱されていません。展開済みの exefs/romfs フォルダを直接選択してください。", "안내: 패키지 추출 도구가 포함되지 않았습니다. 추출된 exefs/romfs 폴더를 직접 선택하세요."},
 
     // Phase 2C: Resolution Scale, 1.5x Speed, & LayeredFS Mods

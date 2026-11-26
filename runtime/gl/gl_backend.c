@@ -120,7 +120,7 @@ static void dump_frame_bmp(uint64_t frame) {
     gl_hle_read_virtual_fbo_rgb(pw, ph, bgr);
 
     const char *dir = getenv("YW1_DUMP_DIR");
-    if (!dir || !*dir) dir = "F:/decode-monsterwatch/work/screenshots";
+    if (!dir || !*dir) dir = "screenshots";
     plat_mkdir_p(dir);
 
     char path[1200];

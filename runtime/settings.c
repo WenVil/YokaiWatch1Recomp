@@ -66,7 +66,7 @@ Settings g_settings = {
     .trigger_threshold = 50,
     .pad_layout = PAD_LAYOUT_NINTENDO,
     .ui_lang = UI_LANG_AUTO,
-    .game_lang = GAME_LANG_ZH_HANS,
+    .game_lang = GAME_LANG_AUTO,
     .game_dir = "",
     .skip_launcher = false,
     .hotkey_menu = SDL_SCANCODE_F1,
@@ -237,13 +237,21 @@ static int parse_hotkey(const char *val, int fallback) {
 
 static int clamp_int(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+static void apply_launcher_pad_fallback(void) {
+    const char *e = getenv("RECOMPLAUNCHER_PAD");
+    if (e && !SDL_strcasecmp(e, "xbox")) bind_preset_pad_xbox();
+}
+
 void settings_load(void) {
     static bool loaded;
     if (loaded) return;
     loaded = true;
     const char *src = settings_read_file();
     FILE *f = open_utf8(src, "r");
-    if (!f) return;
+    if (!f) {
+        apply_launcher_pad_fallback();
+        return;
+    }
     char line[2048];
     bool tip_key = false, aspect_key = false;
     bool seen_win_mode = false, seen_fs = false, seen_hud_mode = false, seen_show_fps = false;
@@ -314,7 +322,7 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "game_lang")) {
             const char *v = normalize_lang_code(val);
-            g_settings.game_lang = parse_choice(v ? v : val, k_game_langs, N_GAME_LANGS, GAME_LANG_ZH_HANS);
+            g_settings.game_lang = parse_choice(v ? v : val, k_game_langs, N_GAME_LANGS, GAME_LANG_AUTO);
         }
         else if (!strcmp(key, "skip_launcher")) g_settings.skip_launcher = atoi(val) != 0;
         else if (!strcmp(key, "hotkey_menu")) g_settings.hotkey_menu = parse_hotkey(val, SDL_SCANCODE_F1);
@@ -337,6 +345,8 @@ void settings_load(void) {
     if (seen_pad_layout && !seen_pad_face) {
         if (g_settings.pad_layout == PAD_LAYOUT_XBOX) bind_preset_pad_xbox();
         else bind_preset_pad_nintendo();
+    } else if (!seen_pad_layout && !seen_pad_face) {
+        apply_launcher_pad_fallback();
     }
     if (g_settings.volume < 0) g_settings.volume = 0;
     if (g_settings.volume > 2) g_settings.volume = 2;

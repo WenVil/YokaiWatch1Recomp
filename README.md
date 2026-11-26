@@ -1,130 +1,119 @@
 **English** | [简体中文](README_zh.md)
 
-# 13SentinelsRecomp
+# YokaiWatch1Recomp
 
-A native Windows PC static recompilation runtime for *13 Sentinels: Aegis Rim* (Nintendo Switch), built upon [peiikai/LASRecomp](https://github.com/peiikai/LASRecomp).
+A native Windows PC static recompilation runtime for *Yo-kai Watch 1* (Nintendo Switch), built upon [peiikai/LASRecomp](https://github.com/peiikai/LASRecomp).
 
 <a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
 
 ---
 
-## Legal & Copyright Notice
+## Legal & Compliance Notice
 
 > [!IMPORTANT]
-> - **Zero Bundled Copyrighted Assets**: This repository and all release packages contain **NO** *13 Sentinels: Aegis Rim* game images, NSO binaries, RomFS data, game fonts, console firmware, or decryption keys (`prod.keys`).
-> - **Not an Emulator**: Using an offline local toolchain, this project statically recompiles legally extracted Switch game code from your own copy directly into a native x86-64 DLL (`lasgame_<build16>.dll`) and runs it natively on Windows PC with Vulkan 1.3 rendering and HLE system services.
-> - This project provides **no** instructions, links, or tools for obtaining copyrighted game ROMs or console keys.
+> - **Zero Bundled Copyrighted Assets**: This repository and all release packages contain **NO** game images, NSO binaries, RomFS `.fa` archives, game fonts, console firmware, saves, or decryption keys (`prod.keys`).
+> - **Not an Emulator**: Using an offline local toolchain (`yw1gen` + `zig`), this project statically recompiles legally extracted Switch game code (`exefs/main` and `exefs/sdk`) from your own copy directly into a native x86-64 DLL (`yw1game_<build16>.dll`) paired with an OpenGL 4.5 renderer and HLE system services.
+> - **Pure LGPL/MIT Runtime Dependencies**: Ships with an LGPLv2.1+ FFmpeg build (`--disable-gpl`, zero GPL codecs such as `x264`/`x265`), zlib SDL3, and an MIT/BSD runtime.
+> - This project provides **NO** links, guides, or tools for obtaining pirated ROMs or decryption keys.
 
 ---
 
 ## Supported Game Versions
 
-| Region & Version | Title ID | Main Build ID (First 16 Hex) | Status | Built-in Game Languages |
+| Game & Region | Title ID | Main Build ID (first 16 hex) | Support Status | Game Text / Mods |
 |---|---|---|---|---|
-| **Asia v1.00** | `01008D7016438000` | `311947020F64F574` | **Verified** | Simplified Chinese, Traditional Chinese, Korean |
-| **US & EU v1.10** | `01003FC01670C000` | `4B632573CA5C160E` | **Verified** | English, French, German, Italian, Spanish |
-| **US & EU v1.00** | `01003FC01670C000` | `57212E16CB83BB55` | **Supported (Recommend updating to v1.10)** | English, French, German, Italian, Spanish |
-| **Japan (JP)** | — | — | **Not Yet Adapted** | — |
+| **Yo-kai Watch 1 (Nintendo Switch JP v1.3.0)** | `0100C0000CEEA000` | `B6E172353E696E65` | **Tested & Verified** | Built-in Switch text (`game_lang = auto` default) + LayeredFS `mods/` support |
+| **Other Revisions (`v1.0.0`, `v1.4.0+`)** | `0100C0000CEEA000` | Pattern-resolved | **Universal Runtime Pattern Resolution** | Automatic function/data offset discovery across Switch builds (`yw1_a.fa` & `romfs/` layouts) |
 
 ---
 
-## Features
+## Key Features
 
-- **Native 60 FPS & Vulkan 1.3 Rendering**: Stable real-time 60 FPS gameplay with windowed, borderless, and exclusive fullscreen modes (`window_mode`), configurable VSync (`mailbox` / `fifo` / `immediate`), and shader pre-warming caches.
-- **Internal Resolution Supersampling & Image Quality Options**: Configurable internal render scale (`auto` / `match` / `dynamic` / `25%` / `50%` / `75%` / `1x` / `1.5x` / `2x`), output resolution (`auto` / `720p` / `1080p` / `1440p` / `4k`), FSR 1 upscaling (`fsr1` / `bilinear` / `auto`), and SMAA antialiasing (`off` / `smaa`).
-- **5-Language Frontend & Live In-Game Settings Menu**: Both the launcher and the in-game overlay (`F1` or controller `Minus + Plus`) support Simplified Chinese, Traditional Chinese, English, Japanese, and Korean with crisp high-DPI text rendering, alongside in-game language switching saved to `13sentinels.ini`.
-- **Full Controller Navigation & Key/Pad Remapping**: Native Nintendo Switch and Xbox button layout presets (`nintendo` / `xbox`), full controller navigation throughout the launcher and settings menu, and full keyboard/mouse/gamepad remapping.
-- **Zero-Copyright Local Self-Build & Save Management**: First launch concurrently lifts and compiles the 3 game modules (`main`, `sdk`, `subsdk0`) into `lasgame_<build16>.dll` with incremental build caching, automatic migration from legacy `larecomp.ini` configs, quick save-folder navigation, and one-click save backups (`save_backups/`).
+- **OpenGL 4.5 Rendering & Internal Resolution Scaling**: Hardware OpenGL 4.5 rendering backed by a virtual `1920x1080` framebuffer with selectable internal supersampling (`1x` 1080p / `1.5x` 1620p / `2x` 4K 2160p via `res_scale`), Windowed / Borderless / Exclusive Fullscreen modes, `16:9` aspect lock or stretch, and configurable V-Sync (`mailbox` / `fifo` / `immediate`).
+- **Variable Game Speed (`1.0x` – `3.0x`) & Smooth Pacing**: Cycle between `1.0x`, `1.5x`, `2.0x`, and `3.0x` speed in real time via `F3` or Settings (`game_speed`), with dynamic `dt` frame pacing and audio pitch/rate sync.
+- **LayeredFS Mods Overlay (`mods/`)**: Drop extracted RomFS/ExeFS mod packs into `mods/<mod_name>/romfs/` (for example, community translation mods) and toggle them with `mods_enabled = 1` without touching your base dump.
+- **Multilingual High-DPI UI (`F1` Overlay & Launcher)**: Built-in launcher UI and in-game overlay (`F1` or `Minus + Plus`) render cleanly in **English, 简体中文, 繁體中文, 日本語, and 한국어** using Windows DirectWrite/ClearType system CJK fonts alongside bundled SIL OFL fonts.
+- **Controller, Keyboard & Mouse-to-Touch Support**: Switch Pro / Nintendo physical (`nintendo`) and Xbox letter (`xbox`) presets (note: `Xbox` maps host controller button positions only and does not replace in-game Switch button icons), full key/pad rebinding, rumble (`rumble_strength`), and direct mouse-to-touch input for menus and touch gameplay. Settings persist in `yokaiwatch1.ini`.
+- **Fast 2-Module Self-Build & Save Management**: On first launch, `yw1gen.exe` and the bundled slimmed Zig 0.17.0 compiler recompile `main` and `sdk` concurrently into `yw1game_<build16>.dll`, caching intermediate artifacts in `.gamebuild/` and storing saves in `save/` with automatic backups in `save_backups/`.
 
 ---
 
 ## System Requirements
 
 - **OS**: Windows 10 / 11 (64-bit)
-- **CPU**: x86-64 processor with **AVX2** and **FMA** support (`x86-64-v3`)
-- **GPU**: Dedicated or integrated GPU supporting **Vulkan 1.3** with up-to-date graphics drivers
-- **RAM / Storage**: 16 GB RAM recommended (8 GB minimum); ~4–8 GB free disk space required for first-time local recompilation
+- **CPU**: x86-64 processor supporting **AVX2** and **FMA** (`x86-64-v3`)
+- **GPU**: Discrete or integrated GPU with up-to-date **OpenGL 4.5** drivers
+- **Memory & Storage**: 8+ GB RAM recommended; ~1 GB free disk space for cached code generation and compiled modules
 
 ---
 
 ## Quick Start
 
-### Step 1: Download & Fully Extract the Release Archive
+### 1. Download and Extract Completely
 
-Download `13SentinelsRecomp-*-windows.zip` from GitHub Releases.
+Download `YokaiWatch1Recomp-*-windows.zip`.
 
 > [!WARNING]
-> **Always extract the entire `.zip` archive to a writable local folder first** (for example `D:\Games\13SentinelsRecomp\`), then open that extracted folder and double-click **`13SentinelsRecomp.exe`**.  
-> **Never double-click `13SentinelsRecomp.exe` directly inside a ZIP archive preview window** — doing so prevents Windows from locating the bundled DLLs, Zig toolchain, and `lasgen` code generator, causing startup or build failures.
+> **Extract the entire `.zip` archive to a writable local folder** (for example, `D:\Games\YokaiWatch1Recomp\`) before running **`YokaiWatch1Recomp.exe`**.  
+> **Do NOT launch the executable directly from inside Windows ZIP Explorer preview** — the runtime requires the accompanying DLLs, `zig/`, `helper/yw1gen/`, `gamelib-src/`, and font files beside the `.exe`.
 
-### Step 2: Prepare Extracted `exefs` & `romfs` Folders
+### 2. Prepare Your Own Extracted Game Files
 
-Dump the Switch files from your own legally owned copy of *13 Sentinels: Aegis Rim* so that a single parent directory contains both `exefs/` and `romfs/`. (To avoid requiring players to install the .NET 9.0 Runtime locally, standard release packages omit an `.nsp`/`.xci` extractor and accept extracted `exefs`/`romfs` folders directly.)
-
-Three common open-source methods to extract `exefs` and `romfs` from your own copy:
-
-1. **On Nintendo Switch (`nxdumptool`)**: Dump **ExeFS** and **RomFS** directly from your cartridge or installed digital title on console using `nxdumptool`.
-2. **On PC via an Open-Source Switch Emulator (e.g., Ryujinx)**: Load your own legally dumped game in Ryujinx — **for US/EU versions, be sure to mount/apply the v1.10 update patch first** — then right-click the title and extract **ExeFS** and **RomFS** separately into `exefs/` and `romfs/`.
-3. **Command-Line Extraction (`hactoolnet` / `nstool`)**: Unpack your own dump using `hactoolnet` (LibHac) or `nstool` together with your own console's `prod.keys`.
-
-> [!NOTE]
-> **US & EU v1.10 Base + Update Merge Requirement**: If extracting US/EU v1.10 via CLI tools or patches, ensure the **base game and v1.10 update are merged** so that `exefs/` holds the updated v1.10 `main` binary (Build ID starting with `4B632573CA5C160E`) and `romfs/` includes `ROBO_PATCH_US.CPK`.
-
-Expected folder structure:
+From your own legally dumped Nintendo Switch copy of *Yo-kai Watch 1* (`0100C0000CEEA000`), extract `exefs/` and `romfs/` into a folder (for example using `nxdumptool` on Switch or `hactoolnet` / `nstool` with your own `prod.keys`):
 
 ```text
-13Sentinels_GameFiles/
+YokaiWatch1_GameFiles/
 ├── exefs/
 │   ├── main
 │   ├── main.npdm
 │   ├── rtld
-│   ├── sdk
-│   └── subsdk0
+│   └── sdk
 └── romfs/
-    └── ROBO_*.CPK   (Asia v1.00: ROBO_CN.CPK, ROBO_KO.CPK, ROBO_TW.CPK;
-                      US/EU v1.10: ROBO_US.CPK, ROBO_PATCH_US.CPK, ROBO_FR.CPK, ROBO_GE.CPK, ROBO_IT.CPK, ROBO_SP.CPK)
+    └── yw1_a.fa   (+ any additional romfs/ archives)
 ```
 
-### Step 3: Launch & Run Local Self-Build
+*(Optional) Adding Mods*: Create `mods/<your_mod_name>/romfs/` inside the program folder (or your configured data folder) and place overriding files matching their relative `romfs/` paths.
 
-Run **`13SentinelsRecomp.exe`** from your extracted folder, select `13Sentinels_GameFiles/` in the launcher, verify that the detected region and version check passes, and click **Build Game Module** or **Start Game**. First-time generation and compilation of all 3 modules takes roughly **6–7 minutes**; subsequent launches reuse cached builds and start within seconds.
+### 3. Build & Play
 
-### Step 4: Play & Configure Settings
+Run **`YokaiWatch1Recomp.exe`**, browse to your `YokaiWatch1_GameFiles/` folder, and click **Build** or **Play**.  
+Once the 2-module native build completes, subsequent launches start immediately from the cached `yw1game_<build16>.dll`.
 
-Press **`F1`** (or controller **`Minus + Plus`**) at any time in game to open the settings overlay for graphics, audio, language, and key/controller bindings. All settings are saved to `13sentinels.ini` next to the executable.
+### Default Hotkeys
+
+| Key | Action |INI Key |
+|---|---|---|
+| `F1` (or `Minus + Plus`) | Open / close in-game settings overlay | `hotkey_menu` |
+| `F2` | Cycle performance HUD (`off` / `fps` / `detailed`) | `hotkey_hud` |
+| `F3` | Cycle game speed (`1.0x` / `1.5x` / `2.0x` / `3.0x`) | `hotkey_speed` |
+| `F11` | Toggle fullscreen | `hotkey_fullscreen` |
 
 ---
 
-## CLI Options (`RecompLauncher` Compatible)
+## Command-Line & Launcher Integration (`RecompLauncher`)
 
-Standard CLI flags are supported for batch scripts and third-party launcher integration (see [recomplauncher.json](recomplauncher.json)):
+`YokaiWatch1Recomp.exe` ships with a validated [recomplauncher.json](recomplauncher.json) manifest and supports:
 
-| Flag | Description |
+| Flag / Environment Variable | Description |
 |---|---|
-| `--game-dir <path>` | Specify the extracted game root directory containing `exefs/` and `romfs/`. |
-| `--build-only` | Headlessly recompile `lasgame_<build16>.dll` and exit upon completion, emitting deduplicated `progress <0.000~1.000> <stage>` status lines on `stdout`. |
-| `--play` | Skip the launcher UI and boot directly using the configured or `--game-dir` game folder. |
+| `--game-dir <path>` | Specify the extracted game folder containing `exefs/` and `romfs/`. |
+| `--build-only` | Recompile `yw1game_<build16>.dll` headlessly and exit, printing `progress <0.000~1.000> <stage>` lines on `stdout`. |
+| `--play` | Skip the launcher UI and boot straight into the game using `--game-dir` or saved `game_dir`. |
+| `RECOMPLAUNCHER_MODE` | `build` / `play` / `launcher` override (`RecompLauncher` integration). |
+| `RECOMPLAUNCHER_DATA` / `LARECOMP_DATA_ROOT` | Override the user data root containing `yokaiwatch1.ini`, `save/`, `mods/`, and `.gamebuild/`. |
+| `RECOMPLAUNCHER_PAD` | Override initial controller preset (`nintendo`, `xbox`, `playstation`). |
 
 ---
 
 ## Building from Source (Windows MSYS2 UCRT64)
 
-Install the MSYS2 UCRT64 toolchain dependencies first (see [docs/BUILD-windows.md](docs/BUILD-windows.md)), then prepare LGPL FFmpeg, Zig, and the frozen code generator:
-
-```bash
-bash tools/build_deps_windows.sh
-bash tools/fetch_zig.sh
-make -j8 GEN_PY=/path/to/python.exe gen-helper
-make -j8 dist
-```
-
-The distributable archive is written to `build/dist/13SentinelsRecomp-v1.0.0-beta1-windows.zip`.
+See [docs/BUILD-windows.md](docs/BUILD-windows.md) for MSYS2 UCRT64 setup, pure LGPLv2.1+ FFmpeg compilation, Zig slimming, freezing `yw1gen.exe`, and assembling the release archive (`make dist`).
 
 ---
 
 ## Credits, Attribution & Disclosure
 
-- **Upstream Attribution**: The core static recompilation runtime, AArch64 instruction lifter/translator, HLE system services, and NVN-to-Vulkan backend are derived from [**peiikai/LASRecomp**](https://github.com/peiikai/LASRecomp) (MIT License).  
-  **Please do NOT report issues or open pull requests on `peiikai/LASRecomp` for this project.** Report any *13 Sentinels: Aegis Rim* compatibility, build, or runtime issues solely in this repository.
-- **Development Transparency**: Adaptation analysis for *13 Sentinels: Aegis Rim*, multilingual UI overhaul, 3-module self-build pipeline, jump-table hardening, and end-to-end testing were **human-led in architecture decisions, test design, and acceptance verification, and developed with AI-assisted coding**.
+- **Upstream Attribution**: The core static recompilation engine, AArch64 lifter/translator, HLE Switch kernel/FS/audio/input services, and self-build framework are derived from [**peiikai/LASRecomp**](https://github.com/peiikai/LASRecomp) (MIT License).  
+  **Please do NOT report issues or open pull requests on `peiikai/LASRecomp` for this project.** Report all *Yo-kai Watch 1* compatibility, OpenGL rendering, build, or runtime issues solely in this repository.
+- **Development Transparency**: *Yo-kai Watch 1* reverse-engineering, OpenGL 4.5 compatibility HLE backend, ASTC software decoding, dynamic `dt`/speed-multiplier hooks, LayeredFS mods overlay, pure LGPL dependency packaging, and automated regression testing were **human-led in architecture decisions, test design, and acceptance verification, and developed with AI-assisted coding**.
 - **Licenses**: See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

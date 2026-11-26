@@ -133,7 +133,7 @@ static void args_free(Args *a) {
 
 // ------------------------------------------------------------------ the tools
 typedef struct {
-    char gen[1100], gen_script[1100];  // generator: lasgen, or (source checkout) the venv's python + tools/gen.py
+    char gen[1100], gen_script[1100];  // generator: yw1gen, or (source checkout) the venv's python + tools/gen.py
     char cc[1100];                     // compiler: zig (as `zig cc`), or LARECOMP_CC / clang
     bool zig;
     char inc[1100], entry[1100], hle[1100];  // headers the game code includes, tools/gamelib_entry.c, HLE names
@@ -155,10 +155,14 @@ static bool find_tools(Tools *t) {
         snprintf(t->gen, sizeof t->gen, "%s", e);
         const char *es = getenv("LARECOMP_GEN_SCRIPT");
         if (es && *es) snprintf(t->gen_script, sizeof t->gen_script, "%s", es);
+    } else if (rt_resource("helper" SEP "yw1gen" SEP "yw1gen" PLAT_EXE_SUFFIX, NULL, t->gen, sizeof t->gen)) {
+        /* Release layout: standalone frozen yw1gen under helper/yw1gen/ next to executable. */
+    } else if (rt_resource("yw1gen" SEP "yw1gen" PLAT_EXE_SUFFIX, NULL, t->gen, sizeof t->gen)) {
+        /* Alternate flat helper folder next to executable. */
     } else if (rt_resource(NULL, "tools/" PLAT_VENV_PYTHON, t->gen, sizeof t->gen) &&
                rt_resource(NULL, "tools/gen.py", t->gen_script, sizeof t->gen_script)) {
-        /* Prefer live repo tools/venv + tools/gen.py over any frozen lasgen binary. */
-    } else if (!rt_resource("lasgen" SEP "lasgen" PLAT_EXE_SUFFIX, NULL, t->gen, sizeof t->gen)) {
+        /* Dev checkout fallback: tools/venv + live tools/gen.py. */
+    } else {
         return false;
     }
     e = getenv("LARECOMP_CC");

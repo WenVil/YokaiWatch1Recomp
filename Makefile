@@ -222,14 +222,14 @@ deps-windows:
 	tools/build_deps_windows.sh
 dist:
 	@[ -f build/deps-win/lib/libavcodec.dll.a ] || { echo "make deps-windows first (LGPL FFmpeg)"; exit 1; }
-	@[ -d build/helper/lasgen ] || { echo "make gen-helper first (the game code generator)"; exit 1; }
+	@[ -d build/helper/yw1gen ] || { echo "make gen-helper first (the game code generator)"; exit 1; }
 	@[ -x build/zig/zig.exe ] || { echo "tools/fetch_zig.sh first (the compiler)"; exit 1; }
 	$(MAKE) B=$(WIN_B) DEPS=$(CURDIR)/build/deps-win RELEASE=1 $(WIN_B)/YokaiWatch1Recomp.exe
 	! nm $(WIN_B)/YokaiWatch1Recomp.exe | grep ' f_70' >/dev/null  # (no game code inside)
-	rm -rf build/dist && mkdir -p "$(DIST)/gamelib-src"
+	rm -rf build/dist && mkdir -p "$(DIST)/gamelib-src" "$(DIST)/helper"
 	cp $(WIN_B)/YokaiWatch1Recomp.exe $(WIN_B)/YokaiWatch1Recomp.dll.a "$(DIST)/"
 	tools/zig_slim.sh $(strip $(filter-out -Iruntime,$(GENFLAGS)))  # (zig with its runtime built ahead of time)
-	cp -R build/helper/lasgen "$(DIST)/"
+	cp -R build/helper/yw1gen "$(DIST)/helper/"
 	cp -R build/zig-slim "$(DIST)/zig"
 	cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
 	    "$(DIST)/gamelib-src/"
@@ -240,10 +240,10 @@ dist:
 	if [ -f third_party/fonts/DejaVu/DejaVuSans.ttf ]; then \
 	    cp third_party/fonts/DejaVu/DejaVuSans.ttf third_party/fonts/DejaVu/DejaVuSans-Bold.ttf "$(DIST)/"; \
 	    cp third_party/fonts/DejaVu/LICENSE "$(DIST)/DejaVu-LICENSE.txt"; fi
-	cp README.md LICENSE THIRD_PARTY_LICENSES.md recomplauncher.json "$(DIST)/"  # (licenses and launcher metadata)
+	cp README.md README_zh.md LICENSE THIRD_PARTY_LICENSES.md recomplauncher.json "$(DIST)/"  # (licenses and launcher metadata)
 	PATH="$(CURDIR)/build/deps-win/bin:$$PATH" ldd $(WIN_B)/YokaiWatch1Recomp.exe | awk '(/ucrt64/ || /deps-win/) {print $$3}' | sort -u | \
 	    xargs -I{} cp -u {} "$(DIST)/"
-	! ls "$(DIST)" | grep -iE 'x264|x265|xvid|postproc'  # (no GPL codec libraries in the release)
+	! ls "$(DIST)" | grep -iE 'x264|x265|xvid|postproc|vulkan|shaderc'  # (no GPL codecs or Vulkan/shaderc in the release)
 	if [ "$${CI:-}" != true ]; then \
 	    case "$$(basename "$$(cygpath -u "$$USERPROFILE")")" in runner|runneradmin) h= ;; *) h=$$(cygpath -m "$$USERPROFILE") ;; esac; \
 	    ! grep -rlaiF -e "$(CURDIR)" -e "$$(cygpath -m '$(CURDIR)')" -e "$$(cygpath -w '$(CURDIR)')" \
@@ -276,15 +276,15 @@ rando-helper: build/rando-venv/.ok
 	    tools/rando/rando_gen.spec
 	@du -sh build/helper/rando-gen
 
-# The game code generator (tools/lasgen.spec): build/helper/lasgen/, shipped as lasgen/ next to the exe.
+# The game code generator (tools/yw1gen.spec): build/helper/yw1gen/, shipped under helper/yw1gen/ next to the exe.
 # Override GEN_PY="/path/to/python.exe" to freeze with an existing Python installation containing pyinstaller, capstone, unicorn, lz4.
 GEN_PY ?=
 gen-helper: $(if $(GEN_PY),,build/rando-venv/.ok build/rando-venv/.gen-ok)
 	$(if $(filter windows,$(PLATFORM)),USERPROFILE="$$(cygpath -w ~ 2>/dev/null || echo $$HOME)") \
 	"$(or $(GEN_PY),$(RANDO_VPY))" -m PyInstaller --noconfirm --clean --log-level WARN --distpath build/helper --workpath build/pyinstaller \
-	    tools/lasgen.spec
-	$(if $(filter windows,$(PLATFORM)),"$(or $(GEN_PY),$(RANDO_VPY))" tools/pe_no_cfg.py build/helper/lasgen/lasgen.exe)
-	@du -sh build/helper/lasgen
+	    tools/yw1gen.spec
+	$(if $(filter windows,$(PLATFORM)),"$(or $(GEN_PY),$(RANDO_VPY))" tools/pe_no_cfg.py build/helper/yw1gen/yw1gen.exe)
+	@du -sh build/helper/yw1gen
 
 build/rando-venv/.gen-ok: build/rando-venv/.ok
 	$(RANDO_VPY) -m pip install -q capstone==5.0.9 unicorn==2.1.4 lz4==4.4.5

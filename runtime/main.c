@@ -345,6 +345,15 @@ int main(int argc, char **argv) {
     bool has_input = getenv("LARECOMP_INPUT") != NULL;
     bool play_flag = false, build_only = false, has_arg_root = false;
     bool env_force_launcher = getenv("LARECOMP_FORCE_LAUNCHER") != NULL;
+    const char *rl_mode = getenv("RECOMPLAUNCHER_MODE");
+    if (rl_mode && *rl_mode) {
+        if (!strcmp(rl_mode, "build") || !strcmp(rl_mode, "build-only") || !strcmp(rl_mode, "build_only"))
+            build_only = true;
+        else if (!strcmp(rl_mode, "play"))
+            play_flag = true;
+        else if (!strcmp(rl_mode, "launcher"))
+            env_force_launcher = true;
+    }
     static char arg_root[1024];
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--play")) play_flag = true;
