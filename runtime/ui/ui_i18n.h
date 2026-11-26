@@ -272,6 +272,7 @@ typedef enum {
     STR_HUD_DRAWS_FMT,
     STR_HUD_WAIT_FMT,
     STR_SPEED_BADGE_FMT,
+    STR_SPEED_MOVIE_PAUSED_FMT,
     STR_HINT_BAR_FMT,
 
     // Local self-build progress & status
@@ -281,6 +282,21 @@ typedef enum {
     STR_BUILD_DONE_FAIL_PFX,
     STR_BUILD_TOOLS_MISS,
     STR_IMP_DIRECT_HINT,
+
+    // Phase 2C: Resolution Scale, 1.5x Speed, & LayeredFS Mods
+    STR_OPT_RES_SCALE,
+    STR_RES_SCALE_1X,
+    STR_RES_SCALE_1_5X,
+    STR_RES_SCALE_2X,
+    STR_OPT_RES_SCALE_DESC,
+    STR_SPEED_1_5X,
+    STR_SEC_MODS,
+    STR_OPT_MODS_ENABLE,
+    STR_OPT_MODS_ENABLE_DESC,
+    STR_BTN_OPEN_MODS,
+    STR_MODS_STATUS_ACTIVE_FMT,
+    STR_MODS_STATUS_DISABLED,
+    STR_MODS_BADGE_FMT,
 
     STR_COUNT
 } UiStr;

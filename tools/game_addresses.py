@@ -63,6 +63,43 @@ def select_build_id(build_id):
     return select_version(version_for_build_id(build_id))
 
 
+YW1_TITLE_ID = 0x0100C0000CEEA000
+
+
+def npdm_title_id(npdm_path):
+    """Read ACI0 Program/Title ID (little-endian uint64) from exefs/main.npdm, or 0 on error."""
+    try:
+        with open(npdm_path, 'rb') as f:
+            hdr = f.read(0x80)
+            if len(hdr) < 0x80 or hdr[:4] != b'META':
+                return 0
+            aci0_off = int.from_bytes(hdr[0x70:0x74], 'little')
+            if aci0_off < 0x80 or aci0_off > 0x100000:
+                return 0
+            f.seek(aci0_off)
+            aci0 = f.read(0x20)
+            if len(aci0) < 0x18 or aci0[:4] != b'ACI0':
+                return 0
+            return int.from_bytes(aci0[0x10:0x18], 'little')
+    except OSError:
+        return 0
+
+
+def select_for_nso(build_id, nso_path=None):
+    """Select version by build ID, or universal Yo-kai Watch 1 (Title ID 0100C0000CEEA000)."""
+    global SELECTED
+    try:
+        return select_build_id(build_id)
+    except UnknownGameVersion:
+        if nso_path:
+            npdm = Path(nso_path).resolve().parent / 'main.npdm'
+            if npdm_title_id(npdm) == YW1_TITLE_ID:
+                ADDRESS.__dict__.clear()
+                SELECTED = 'vyw1_universal'
+                return SELECTED
+        raise
+
+
 def addr_text(code):
     """Expand @NAME@ as hex digits inside generated-C addresses, symbols or labels."""
     return re.sub(r'@([A-Z][A-Z0-9_]*)@', lambda m: f'{getattr(ADDRESS, m[1]):x}', code)

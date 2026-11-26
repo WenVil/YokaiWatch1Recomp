@@ -848,11 +848,12 @@ def main():
     if args.name == 'main':
         import game_addresses
         try:
-            version = game_addresses.select_build_id(m.nso.build_id)
+            version = game_addresses.select_for_nso(m.nso.build_id, args.nso)
         except game_addresses.UnknownGameVersion as e:
             if not args.generic:
                 sys.exit(f'{args.name}: {e}')
-        lbl = game_addresses.VERSIONS[version][0] if version else 'generic'
+        lbl = (game_addresses.VERSIONS[version][0] if (version and version in game_addresses.VERSIONS)
+               else ('Yo-kai Watch 1 Universal' if version == 'vyw1_universal' else 'generic'))
         print(f'{args.name}: generic Route A generation for {lbl} (build {m.nso.build_id[:16]})', file=sys.stderr)
     else:
         print(f'{args.name}: generic Route A generation (build {m.nso.build_id[:16]})', file=sys.stderr)
@@ -1152,7 +1153,8 @@ def main():
         f.write(f'const uint64_t {args.name}_fn_count = {len(all_addrs)};\n')
         write_if_changed(os.path.join(args.outdir, f'{args.name}_table.c'), f.getvalue())
     if args.name == 'main':  # (what this code was generated from: the Makefile's game code library id, GAMELIB_BUILD_ID)
-        bid = game_addresses.VERSIONS[version][1] if version else m.nso.build_id.upper()
+        bid = (game_addresses.VERSIONS[version][1] if (version and version in game_addresses.VERSIONS)
+               else m.nso.build_id.upper())
         write_if_changed(os.path.join(args.outdir, 'main_build_id.txt'), bid + '\n')
     print(f'{args.name}: wrote {nchunks} chunks, {time.time() - t0:.0f}s total', file=sys.stderr)
 

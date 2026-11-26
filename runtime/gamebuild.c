@@ -502,6 +502,7 @@ bool gamebuild_run_into(const char *game_dir, const char *cache_dir, const GameB
         add(&a, base[i]);
         add(&a, g->out);
         if (i == 1) { add(&a, "--hle"); add(&a, t.hle); }
+        if (is_yw1) add(&a, "--generic");
         g->p = spawn_proc(a.v, g->log, true);
         args_free(&a);
         if (!g->p) { snprintf(why, why_size, "the game code builder didn't start"); ok = false; }

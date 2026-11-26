@@ -21,9 +21,30 @@ typedef struct {
     uint64_t size;  // the whole image
 } RomfsLayout;
 
+// Lays out the RomFS image of the folder `dir` with optional LayeredFS overlay directories applied in order.
+// `overlay_dirs[n_overlays - 1]` has the highest priority. false = failed (why: a short message).
+bool romfs_layout_with_overlays(const char *dir, const char *const *overlay_dirs, int n_overlays,
+                                RomfsLayout *out, char *why, size_t why_size,
+                                int *out_replaced, int *out_added);
+
 // Lays out the RomFS image of the folder `dir`. false = failed (why: a short message).
 bool romfs_layout(const char *dir, RomfsLayout *out, char *why, size_t why_size);
 void romfs_layout_free(RomfsLayout *l);
+
+typedef struct {
+    char name[256];
+    bool is_dir;
+    uint64_t size;
+} FsLayeredEntry;
+
+// LayeredFS mods helpers (runtime/services/fs.c).
+void fs_mods_dir(char *out, size_t cap);
+bool fs_mods_enabled(void);
+int fs_mods_count(void);
+int fs_list_active_mod_romfs(char out_romfs[][1100], char out_names[][256], int max_mods);
+bool fs_resolve_romfs_file(const char *rel, char *out, size_t cap, uint64_t *out_size);
+bool fs_layered_stat(const char *rel, bool *out_is_dir, uint64_t *out_size);
+int fs_layered_list_dir(const char *rel, FsLayeredEntry **out_entries);
 
 // Bytes of file data under dir (the image is about this plus its tables).
 uint64_t romfs_dir_bytes(const char *dir);

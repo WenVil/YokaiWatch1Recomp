@@ -100,8 +100,8 @@ extern void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out,
 #define GL_TEXTURE_BINDING_2D 0x8069
 #endif
 
-#define VFBO_W 1920
-#define VFBO_H 1080
+#define VFBO_BASE_W 1920
+#define VFBO_BASE_H 1080
 #ifndef GL_BGR_EXT
 #define GL_BGR_EXT 0x80E0
 #endif
@@ -367,17 +367,25 @@ static struct {
 } g_comp_fmts[64];
 static int g_ncomp_fmts;
 
-// Texture / Renderbuffer dimensions for offscreen FBO attachment telemetry
+// Texture / Renderbuffer dimensions for offscreen FBO attachment telemetry & supersampling
 #define OBJ_DIM_CAP 4096
 typedef struct {
     GLuint id;
     GLenum fmt;
     GLsizei w, h;
+    bool scaled;
     bool used;
 } ObjDimSlot;
 static ObjDimSlot g_tex_dims[OBJ_DIM_CAP];
 static ObjDimSlot g_rbo_dims[OBJ_DIM_CAP];
 static GLuint g_cur_tex2d, g_cur_rbo;
+
+typedef struct {
+    GLuint fbo;
+    bool scaled;
+    bool used;
+} FboScaleSlot;
+static FboScaleSlot g_fbo_scales[OBJ_DIM_CAP];
 
 typedef struct {
     GLsizei w, h;
@@ -404,14 +412,46 @@ typedef struct {
 static ViewportStat g_vp_stats[64];
 static int g_nvp_stats;
 
-// Virtual 1080p default framebuffer & guest FBO=0 tracking
+// Virtual default framebuffer (1080p * res_scale) & guest FBO=0 tracking
+static int g_res_scale_pct = 100;
+static int g_vfbo_w = VFBO_BASE_W;
+static int g_vfbo_h = VFBO_BASE_H;
 static GLuint g_virtual_fbo;
 static GLuint g_vfbo_color;
 static GLuint g_vfbo_depth;
 static GLuint g_guest_draw_fbo;
 static GLuint g_guest_read_fbo;
 
-static void obj_dim_set_locked(ObjDimSlot *tab, GLuint id, GLenum fmt, GLsizei w, GLsizei h) {
+static int g_sh_audit_total;
+static int g_sh_audit_fragcoord;
+static int g_sh_audit_texsize;
+static int g_sh_audit_texelfetch;
+static int g_sh_audit_dfdx;
+static int g_sh_audit_gauss_uni;
+
+static bool is_16_9_rt_dims(GLsizei w, GLsizei h) {
+    if (w < 480 || h < 270 || w == h) return false;
+    return (int64_t)w * 9 == (int64_t)h * 16;
+}
+
+static int resolve_configured_res_scale_pct(void) {
+    const char *env = getenv("YW1_RES_SCALE");
+    if (env && *env) {
+        double v = atof(env);
+        int pct = (v > 10.0) ? (int)(v + 0.5) : (int)(v * 100.0 + 0.5);
+        if (pct >= 180) return 200;
+        if (pct >= 125) return 150;
+        return 100;
+    }
+    switch (g_settings.res_scale) {
+    case RES_SCALE_1_5X: return 150;
+    case RES_SCALE_2X:   return 200;
+    case RES_SCALE_1X:
+    default:             return 100;
+    }
+}
+
+static void obj_dim_set_locked(ObjDimSlot *tab, GLuint id, GLenum fmt, GLsizei w, GLsizei h, bool scaled) {
     if (!id || w <= 0 || h <= 0) return;
     uint32_t idx = (uint32_t)(id * 2654435761u) & (OBJ_DIM_CAP - 1);
     for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
@@ -421,13 +461,15 @@ static void obj_dim_set_locked(ObjDimSlot *tab, GLuint id, GLenum fmt, GLsizei w
             s->fmt = fmt;
             s->w = w;
             s->h = h;
+            s->scaled = scaled;
             s->used = true;
             return;
         }
     }
 }
 
-static bool obj_dim_get_locked(const ObjDimSlot *tab, GLuint id, GLenum *fmt_out, GLsizei *w_out, GLsizei *h_out) {
+static bool obj_dim_get_locked(const ObjDimSlot *tab, GLuint id, GLenum *fmt_out, GLsizei *w_out, GLsizei *h_out,
+                               bool *scaled_out) {
     if (!id) return false;
     uint32_t idx = (uint32_t)(id * 2654435761u) & (OBJ_DIM_CAP - 1);
     for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
@@ -437,8 +479,51 @@ static bool obj_dim_get_locked(const ObjDimSlot *tab, GLuint id, GLenum *fmt_out
             if (fmt_out) *fmt_out = s->fmt;
             if (w_out) *w_out = s->w;
             if (h_out) *h_out = s->h;
+            if (scaled_out) *scaled_out = s->scaled;
             return true;
         }
+    }
+    return false;
+}
+
+static void fbo_scale_set_locked(GLuint fbo, bool scaled) {
+    if (!fbo) return;
+    uint32_t idx = (uint32_t)(fbo * 2654435761u) & (OBJ_DIM_CAP - 1);
+    for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
+        FboScaleSlot *s = &g_fbo_scales[(idx + i) & (OBJ_DIM_CAP - 1)];
+        if (!s->used || s->fbo == fbo) {
+            if (!s->used) {
+                s->fbo = fbo;
+                s->scaled = scaled;
+                s->used = true;
+            } else if (scaled) {
+                s->scaled = true;
+            }
+            return;
+        }
+    }
+}
+
+static void fbo_scale_clear_locked(GLuint fbo) {
+    if (!fbo) return;
+    uint32_t idx = (uint32_t)(fbo * 2654435761u) & (OBJ_DIM_CAP - 1);
+    for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
+        FboScaleSlot *s = &g_fbo_scales[(idx + i) & (OBJ_DIM_CAP - 1)];
+        if (!s->used) return;
+        if (s->fbo == fbo) {
+            s->scaled = false;
+            return;
+        }
+    }
+}
+
+static bool fbo_is_scaled_locked(GLuint fbo) {
+    if (fbo == 0) return g_res_scale_pct > 100;
+    uint32_t idx = (uint32_t)(fbo * 2654435761u) & (OBJ_DIM_CAP - 1);
+    for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
+        const FboScaleSlot *s = &g_fbo_scales[(idx + i) & (OBJ_DIM_CAP - 1)];
+        if (!s->used) return false;
+        if (s->fbo == fbo) return s->scaled;
     }
     return false;
 }
@@ -450,7 +535,9 @@ static void record_offscreen_fbo(GLenum target, GLenum attachment, bool is_rbo, 
     pthread_mutex_lock(&g_gl_lock);
     GLenum fmt = 0;
     GLsizei w = 0, h = 0;
-    if (obj_dim_get_locked(is_rbo ? g_rbo_dims : g_tex_dims, obj_id, &fmt, &w, &h) && w > 0 && h > 0) {
+    bool obj_scaled = false;
+    if (obj_dim_get_locked(is_rbo ? g_rbo_dims : g_tex_dims, obj_id, &fmt, &w, &h, &obj_scaled) && w > 0 && h > 0) {
+        fbo_scale_set_locked(fbo, obj_scaled);
         bool is_new_slot = true;
         for (int i = 0; i < g_nfbo_seen; i++) {
             if (g_fbo_seen[i].fbo == fbo && g_fbo_seen[i].attachment == attachment &&
@@ -542,6 +629,7 @@ RT_ON_RESET(gl_hle_reset) {
     memset(g_comp_fmts, 0, sizeof g_comp_fmts);
     memset(g_tex_dims, 0, sizeof g_tex_dims);
     memset(g_rbo_dims, 0, sizeof g_rbo_dims);
+    memset(g_fbo_scales, 0, sizeof g_fbo_scales);
     g_cur_tex2d = g_cur_rbo = 0;
     memset(g_fbo_stats, 0, sizeof g_fbo_stats);
     g_nfbo_stats = 0;
@@ -549,8 +637,12 @@ RT_ON_RESET(gl_hle_reset) {
     g_nfbo_seen = 0;
     memset(g_vp_stats, 0, sizeof g_vp_stats);
     g_nvp_stats = 0;
+    g_res_scale_pct = 100;
+    g_vfbo_w = VFBO_BASE_W;
+    g_vfbo_h = VFBO_BASE_H;
     g_virtual_fbo = g_vfbo_color = g_vfbo_depth = 0;
     g_guest_draw_fbo = g_guest_read_fbo = 0;
+    g_sh_audit_total = g_sh_audit_fragcoord = g_sh_audit_texsize = g_sh_audit_texelfetch = g_sh_audit_dfdx = g_sh_audit_gauss_uni = 0;
     memset(g_gl_err_stats, 0, sizeof g_gl_err_stats);
     g_gl_err_kind_n = 0;
     g_gl_err_total = 0;
@@ -584,12 +676,15 @@ void gl_hle_ensure_virtual_fbo(void) {
         if (g_gl.p_glBindFramebuffer) g_gl.p_glBindFramebuffer(GL_FRAMEBUFFER, g_virtual_fbo);
         return;
     }
+    g_res_scale_pct = resolve_configured_res_scale_pct();
+    g_vfbo_w = (VFBO_BASE_W * g_res_scale_pct) / 100;
+    g_vfbo_h = (VFBO_BASE_H * g_res_scale_pct) / 100;
     if (!g_gl.p_glGenFramebuffers || !g_gl.p_glBindFramebuffer || !g_gl.p_glGenTextures ||
         !g_gl.p_glBindTexture || !g_gl.p_glTexImage2D || !g_gl.p_glTexParameteri ||
         !g_gl.p_glFramebufferTexture2D || !g_gl.p_glGenRenderbuffers ||
         !g_gl.p_glBindRenderbuffer || !g_gl.p_glRenderbufferStorage ||
         !g_gl.p_glFramebufferRenderbuffer || !g_gl.p_glCheckFramebufferStatus) {
-        LOG("[gl] ERROR: missing GL procs needed for virtual 1080p FBO\n");
+        LOG("[gl] ERROR: missing GL procs needed for virtual %dx%d FBO\n", g_vfbo_w, g_vfbo_h);
         return;
     }
 
@@ -601,7 +696,7 @@ void gl_hle_ensure_virtual_fbo(void) {
 
     g_gl.p_glGenTextures(1, &g_vfbo_color);
     g_gl.p_glBindTexture(GL_TEXTURE_2D, g_vfbo_color);
-    g_gl.p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, VFBO_W, VFBO_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    g_gl.p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, g_vfbo_w, g_vfbo_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     g_gl.p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     g_gl.p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     g_gl.p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -609,7 +704,7 @@ void gl_hle_ensure_virtual_fbo(void) {
 
     g_gl.p_glGenRenderbuffers(1, &g_vfbo_depth);
     g_gl.p_glBindRenderbuffer(GL_RENDERBUFFER, g_vfbo_depth);
-    g_gl.p_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, VFBO_W, VFBO_H);
+    g_gl.p_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, g_vfbo_w, g_vfbo_h);
 
     g_gl.p_glGenFramebuffers(1, &g_virtual_fbo);
     g_gl.p_glBindFramebuffer(GL_FRAMEBUFFER, g_virtual_fbo);
@@ -618,18 +713,25 @@ void gl_hle_ensure_virtual_fbo(void) {
 
     GLenum status = g_gl.p_glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        LOG("[gl] ERROR: virtual %dx%d FBO incomplete (status=0x%04x)\n", VFBO_W, VFBO_H, (unsigned)status);
+        LOG("[gl] ERROR: virtual %dx%d FBO incomplete (status=0x%04x)\n", g_vfbo_w, g_vfbo_h, (unsigned)status);
     } else {
-        LOG("[gl] virtual %dx%d default FBO #%u ready (color_tex=%u RGBA8 GL_LINEAR, ds_rbo=%u D24S8)\n",
-            VFBO_W, VFBO_H, g_virtual_fbo, g_vfbo_color, g_vfbo_depth);
+        LOG("[gl] virtual %dx%d default FBO #%u ready (res_scale=%.1fx color_tex=%u RGBA8 GL_LINEAR, ds_rbo=%u D24S8)\n",
+            g_vfbo_w, g_vfbo_h, g_virtual_fbo, (double)g_res_scale_pct / 100.0, g_vfbo_color, g_vfbo_depth);
     }
 
     g_gl.p_glBindTexture(GL_TEXTURE_2D, (GLuint)prev_tex);
     g_gl.p_glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)prev_rbo);
-    if (g_gl.p_glViewport) g_gl.p_glViewport(0, 0, VFBO_W, VFBO_H);
+    if (g_gl.p_glViewport) g_gl.p_glViewport(0, 0, g_vfbo_w, g_vfbo_h);
     g_guest_draw_fbo = 0;
     g_guest_read_fbo = 0;
 }
+
+void gl_hle_get_virtual_fbo_size(int *w_out, int *h_out) {
+    if (w_out) *w_out = g_vfbo_w > 0 ? g_vfbo_w : VFBO_BASE_W;
+    if (h_out) *h_out = g_vfbo_h > 0 ? g_vfbo_h : VFBO_BASE_H;
+}
+
+int gl_hle_active_res_scale_pct(void) { return g_res_scale_pct; }
 
 void gl_hle_blit_virtual_fbo(int win_w, int win_h) {
     if (!g_virtual_fbo || win_w <= 0 || win_h <= 0 || !g_gl.p_glBlitFramebuffer ||
@@ -639,10 +741,10 @@ void gl_hle_blit_virtual_fbo(int win_w, int win_h) {
 
     int dst_x = 0, dst_y = 0, dst_w = win_w, dst_h = win_h;
     if (g_settings.aspect_mode != ASPECT_MODE_STRETCH) {
-        dst_h = (win_w * VFBO_H + VFBO_W / 2) / VFBO_W;
+        dst_h = (win_w * g_vfbo_h + g_vfbo_w / 2) / g_vfbo_w;
         if (dst_h > win_h) {
             dst_h = win_h;
-            dst_w = (win_h * VFBO_W + VFBO_H / 2) / VFBO_H;
+            dst_w = (win_h * g_vfbo_w + g_vfbo_h / 2) / g_vfbo_h;
         }
         dst_x = (win_w - dst_w) / 2;
         dst_y = (win_h - dst_h) / 2;
@@ -658,7 +760,7 @@ void gl_hle_blit_virtual_fbo(int win_w, int win_h) {
     pthread_mutex_unlock(&g_gl_lock);
 
     GLint prev_read_fbo = 0, prev_draw_fbo = 0, prev_read_buf = GL_COLOR_ATTACHMENT0;
-    GLint prev_vp[4] = {0, 0, VFBO_W, VFBO_H};
+    GLint prev_vp[4] = {0, 0, g_vfbo_w, g_vfbo_h};
     GLfloat prev_clear[4] = {0, 0, 0, 0};
     GLboolean prev_cmask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
     GLboolean prev_scissor = g_gl.p_glIsEnabled ? g_gl.p_glIsEnabled(GL_SCISSOR_TEST) : GL_FALSE;
@@ -681,7 +783,7 @@ void gl_hle_blit_virtual_fbo(int win_w, int win_h) {
         g_gl.p_glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         g_gl.p_glClear(GL_COLOR_BUFFER_BIT);
     }
-    g_gl.p_glBlitFramebuffer(0, 0, VFBO_W, VFBO_H,
+    g_gl.p_glBlitFramebuffer(0, 0, g_vfbo_w, g_vfbo_h,
                              dst_x, dst_y, dst_x + dst_w, dst_y + dst_h,
                              GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
@@ -788,9 +890,13 @@ void gl_hle_log_summary(void) {
     hid_vibration_counts(&vib_single, &vib_batch);
 
     pthread_mutex_lock(&g_gl_lock);
-    LOG("[gl] SUMMARY: shaders(ok=%d fail=%d) programs(ok=%d fail=%d) epa(hits=%u misses=%u) glErrors=%llu\n",
+    LOG("[gl] SUMMARY: res_scale=%.1fx (%dx%d) shaders(ok=%d fail=%d) programs(ok=%d fail=%d) epa(hits=%u misses=%u) glErrors=%llu\n",
+        (double)g_res_scale_pct / 100.0, g_vfbo_w, g_vfbo_h,
         g_shader_ok, g_shader_fail, g_prog_ok, g_prog_fail,
         g_epa_hits, g_epa_misses, (unsigned long long)g_gl_err_total);
+    LOG("[gl] SUMMARY shader_audit: scanned=%d gl_FragCoord=%d textureSize=%d texelFetch=%d dFdx=%d unf_Gaussian=%d\n",
+        g_sh_audit_total, g_sh_audit_fragcoord, g_sh_audit_texsize,
+        g_sh_audit_texelfetch, g_sh_audit_dfdx, g_sh_audit_gauss_uni);
     uint64_t astc_calls = 0, astc_ns = 0;
     if (g_ncomp_fmts == 0) {
         LOG("[gl] SUMMARY compressed_tex: none\n");
@@ -919,6 +1025,43 @@ static void store_shader_head(GLuint shader, const char *src, int len) {
     }
 }
 
+static void audit_full_shader_source(GLuint shader, const GLchar *const *strings, GLsizei count, const GLint *lengths) {
+    if (count <= 0 || !strings) return;
+    size_t total = 0;
+    for (GLsizei i = 0; i < count; i++) {
+        if (!strings[i]) continue;
+        total += (lengths && lengths[i] >= 0) ? (size_t)lengths[i] : strlen(strings[i]);
+    }
+    char *full = malloc(total + 1);
+    if (!full) return;
+    size_t p = 0;
+    for (GLsizei i = 0; i < count; i++) {
+        if (!strings[i]) continue;
+        size_t n = (lengths && lengths[i] >= 0) ? (size_t)lengths[i] : strlen(strings[i]);
+        memcpy(full + p, strings[i], n);
+        p += n;
+    }
+    full[p] = 0;
+    bool has_fc = strstr(full, "gl_FragCoord") != NULL;
+    bool has_ts = strstr(full, "textureSize") != NULL;
+    bool has_tf = strstr(full, "texelFetch") != NULL;
+    bool has_dx = strstr(full, "dFdx") != NULL || strstr(full, "dFdy") != NULL || strstr(full, "fwidth") != NULL;
+    bool has_gs = strstr(full, "unf_Gaussian.textureSize") != NULL;
+    pthread_mutex_lock(&g_gl_lock);
+    g_sh_audit_total++;
+    if (has_fc) g_sh_audit_fragcoord++;
+    if (has_ts) g_sh_audit_texsize++;
+    if (has_tf) g_sh_audit_texelfetch++;
+    if (has_dx) g_sh_audit_dfdx++;
+    if (has_gs) g_sh_audit_gauss_uni++;
+    pthread_mutex_unlock(&g_gl_lock);
+    if ((has_fc || has_ts || has_tf || has_dx || has_gs) && getenv("YW1_AUDIT_SHADERS")) {
+        LOG("[gl] SHADER AUDIT #%u: fc=%d ts=%d tf=%d df=%d gauss=%d len=%zu\n%s\n",
+            shader, has_fc, has_ts, has_tf, has_dx, has_gs, p, full);
+    }
+    free(full);
+}
+
 static void hle_glShaderSource(Cpu *c) {
     GLuint shader = U32(0);
     GLsizei count = I32(1);
@@ -937,6 +1080,7 @@ static void hle_glShaderSource(Cpu *c) {
         }
         buf[pos] = 0;
         store_shader_head(shader, buf, pos);
+        audit_full_shader_source(shader, strings, count, lengths);
     }
     g_gl.p_glShaderSource(shader, count, strings, lengths);
 }
@@ -1076,6 +1220,11 @@ static void hle_glDeleteFramebuffers(Cpu *c) {
     GLsizei n = I32(0);
     const GLuint *fbs = (const GLuint *)CPTR(1);
     g_gl.p_glDeleteFramebuffers(n, fbs);
+    if (fbs && n > 0) {
+        pthread_mutex_lock(&g_gl_lock);
+        for (GLsizei i = 0; i < n; i++) fbo_scale_clear_locked(fbs[i]);
+        pthread_mutex_unlock(&g_gl_lock);
+    }
     if (fbs && n > 0 && g_virtual_fbo != 0) {
         for (GLsizei i = 0; i < n; i++) {
             if (fbs[i] == 0) continue;
@@ -1238,14 +1387,37 @@ static void hle_glReadPixels(Cpu *c) { g_gl.p_glReadPixels(I32(0), I32(1), I32(2
 static void hle_glRenderbufferStorage(Cpu *c) {
     GLenum target = U32(0), fmt = U32(1);
     GLsizei w = I32(2), h = I32(3);
+    bool scaled = false;
+    GLsizei real_w = w, real_h = h;
     if (target == GL_RENDERBUFFER && w > 0 && h > 0) {
+        if (g_res_scale_pct > 100 && is_16_9_rt_dims(w, h)) {
+            scaled = true;
+            real_w = (GLsizei)(((int64_t)w * g_res_scale_pct) / 100);
+            real_h = (GLsizei)(((int64_t)h * g_res_scale_pct) / 100);
+        }
         pthread_mutex_lock(&g_gl_lock);
-        obj_dim_set_locked(g_rbo_dims, g_cur_rbo, fmt, w, h);
+        obj_dim_set_locked(g_rbo_dims, g_cur_rbo, fmt, w, h, scaled);
         pthread_mutex_unlock(&g_gl_lock);
     }
-    g_gl.p_glRenderbufferStorage(target, fmt, w, h);
+    g_gl.p_glRenderbufferStorage(target, fmt, real_w, real_h);
 }
-static void hle_glScissor(Cpu *c) { g_gl.p_glScissor(I32(0), I32(1), I32(2), I32(3)); }
+static void hle_glScissor(Cpu *c) {
+    GLint x = I32(0), y = I32(1);
+    GLsizei w = I32(2), h = I32(3);
+    if (g_res_scale_pct > 100) {
+        bool scale_cur = false;
+        pthread_mutex_lock(&g_gl_lock);
+        scale_cur = fbo_is_scaled_locked(g_guest_draw_fbo);
+        pthread_mutex_unlock(&g_gl_lock);
+        if (scale_cur) {
+            x = (GLint)(((int64_t)x * g_res_scale_pct) / 100);
+            y = (GLint)(((int64_t)y * g_res_scale_pct) / 100);
+            w = (GLsizei)(((int64_t)w * g_res_scale_pct) / 100);
+            h = (GLsizei)(((int64_t)h * g_res_scale_pct) / 100);
+        }
+    }
+    g_gl.p_glScissor(x, y, w, h);
+}
 static void hle_glStencilFunc(Cpu *c) { g_gl.p_glStencilFunc(U32(0), I32(1), U32(2)); }
 static void hle_glStencilMask(Cpu *c) { g_gl.p_glStencilMask(U32(0)); }
 static void hle_glStencilOp(Cpu *c) { g_gl.p_glStencilOp(U32(0), U32(1), U32(2)); }
@@ -1256,12 +1428,20 @@ static void hle_glTexImage2D(Cpu *c) {
     GLint border = I32(5);
     GLenum fmt = U32(6), type = U32(7);
     const void *pixels = STK_PTR(0);
+    bool scaled = false;
+    GLsizei real_w = w, real_h = h;
     if (target == GL_TEXTURE_2D && level == 0 && w > 0 && h > 0) {
+        // Scale 16:9 offscreen render target textures (pixels == NULL); exclude movie uploads (pixels != NULL), UI, and 2048x2048 shadows.
+        if (g_res_scale_pct > 100 && pixels == NULL && is_16_9_rt_dims(w, h)) {
+            scaled = true;
+            real_w = (GLsizei)(((int64_t)w * g_res_scale_pct) / 100);
+            real_h = (GLsizei)(((int64_t)h * g_res_scale_pct) / 100);
+        }
         pthread_mutex_lock(&g_gl_lock);
-        obj_dim_set_locked(g_tex_dims, g_cur_tex2d, (GLenum)int_fmt, w, h);
+        obj_dim_set_locked(g_tex_dims, g_cur_tex2d, (GLenum)int_fmt, w, h, scaled);
         pthread_mutex_unlock(&g_gl_lock);
     }
-    g_gl.p_glTexImage2D(target, level, int_fmt, w, h, border, fmt, type, pixels);
+    g_gl.p_glTexImage2D(target, level, int_fmt, real_w, real_h, border, fmt, type, pixels);
 }
 static void hle_glTexParameterf(Cpu *c) { g_gl.p_glTexParameterf(U32(0), U32(1), F32(0)); }
 static void hle_glTexParameterfv(Cpu *c) { g_gl.p_glTexParameterfv(U32(0), U32(1), (const GLfloat *)CPTR(2)); }
@@ -1299,6 +1479,18 @@ static void hle_glViewport(Cpu *c) {
     GLint x = I32(0), y = I32(1);
     GLsizei w = I32(2), h = I32(3);
     record_viewport_stat(w, h);
+    if (g_res_scale_pct > 100) {
+        bool scale_cur = false;
+        pthread_mutex_lock(&g_gl_lock);
+        scale_cur = fbo_is_scaled_locked(g_guest_draw_fbo);
+        pthread_mutex_unlock(&g_gl_lock);
+        if (scale_cur) {
+            x = (GLint)(((int64_t)x * g_res_scale_pct) / 100);
+            y = (GLint)(((int64_t)y * g_res_scale_pct) / 100);
+            w = (GLsizei)(((int64_t)w * g_res_scale_pct) / 100);
+            h = (GLsizei)(((int64_t)h * g_res_scale_pct) / 100);
+        }
+    }
     g_gl.p_glViewport(x, y, w, h);
 }
 

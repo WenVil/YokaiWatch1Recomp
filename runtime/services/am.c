@@ -31,11 +31,18 @@ static void am_init_once(void) {
     pthread_mutex_unlock(&g_klock);
 }
 
-static uint32_t new_event(void) {
+static uint32_t new_event_signaled(bool signaled) {
     uint32_t w, r;
-    kernel_create_event_pair(&w, &r);
+    KEvent *ev = kernel_create_event_pair(&w, &r);
+    if (signaled && ev) {
+        pthread_mutex_lock(&g_klock);
+        kernel_signal(ev);
+        pthread_mutex_unlock(&g_klock);
+    }
     return r;
 }
+
+static uint32_t new_event(void) { return new_event_signaled(false); }
 
 #define UNHANDLED(iface) do { ipc_note_unhandled_iface(iface, req->cmd); LOG("[am] %s cmd %u (unhandled, ok)\n", iface, req->cmd); } while (0)
 
@@ -127,10 +134,82 @@ static void am_storage(Service *s, IpcReq *req, IpcResp *resp) {
 
 static Service *new_am_storage(const void *data, uint64_t size) {
     AmStorage *st = calloc(1, sizeof *st);
-    st->data = calloc(1, size);
+    st->data = calloc(1, size ? size : 1);
     st->size = size;
-    if (data) memcpy(st->data, data, size);
+    if (data && size) memcpy(st->data, data, size);
     return service_new("IStorage", am_storage, st);
+}
+
+// ------------------------------------------------------------------ ILibraryAppletCreator / Accessor
+typedef struct {
+    uint32_t applet_id;
+    uint32_t mode;
+    uint32_t state_ev_r;
+    uint32_t pop_ev_r;
+    bool popped_out;
+} AppletAccessor;
+
+static void applet_accessor_close(Service *s) {
+    free(s->state);
+    s->state = NULL;
+}
+
+static void library_applet_accessor(Service *s, IpcReq *req, IpcResp *resp) {
+    AppletAccessor *a = s->state;
+    switch (req->cmd) {
+    case 0: resp->copy_handles[resp->ncopy++] = a->state_ev_r; break;  // GetAppletStateChangedEvent
+    case 1: OUT(uint8_t, 0) = 1; resp_size(resp, 1); break;  // IsCompleted -> true immediately
+    case 10: case 20: case 25: case 30: case 50:  // Start / RequestExit / Terminate / GetResult / SetOutOfFocus...
+    case 100: case 102: case 103: case 150:       // PushInData / PushExtraStorage / PushInteractiveInData / RequestForeground
+        break;
+    case 101:  // PopOutData -> zeroed OfflineHtmlPageReturnValue / WebCommonReturnValue on first pop
+        if (!a->popped_out) {
+            a->popped_out = true;
+            ipc_return_object(resp, new_am_storage(NULL, 0x2000));
+        } else {
+            resp->result = AM_NO_DATA;
+        }
+        break;
+    case 104: resp->result = AM_NO_DATA; break;  // PopInteractiveOutData
+    case 105: resp->copy_handles[resp->ncopy++] = a->pop_ev_r; break;  // GetPopOutDataEvent
+    case 106: resp->copy_handles[resp->ncopy++] = new_event(); break;  // GetPopInteractiveOutDataEvent
+    case 110: OUT(uint8_t, 0) = 0; resp_size(resp, 1); break;  // NeedsToExitProcess
+    case 120:  // GetLibraryAppletInfo
+        OUT(uint32_t, 0) = a->applet_id;
+        OUT(uint32_t, 4) = a->mode;
+        resp_size(resp, 8);
+        break;
+    case 160: OUT(uint64_t, 0) = 0x1000; resp_size(resp, 8); break;  // GetIndirectLayerConsumerHandle
+    default: UNHANDLED("ILibraryAppletAccessor");
+    }
+}
+
+static void library_applet_creator(Service *s, IpcReq *req, IpcResp *resp) {
+    (void)s;
+    switch (req->cmd) {
+    case 0: {  // CreateLibraryApplet(applet_id, mode)
+        AppletAccessor *a = calloc(1, sizeof *a);
+        a->applet_id = IN(uint32_t, 0);
+        a->mode = IN(uint32_t, 4);
+        a->state_ev_r = new_event_signaled(true);
+        a->pop_ev_r = new_event_signaled(true);
+        Service *svc = service_new("ILibraryAppletAccessor", library_applet_accessor, a);
+        svc->on_close = applet_accessor_close;
+        LOG("[am] CreateLibraryApplet id=0x%x mode=%u (immediate-complete)\n", a->applet_id, a->mode);
+        ipc_return_object(resp, svc);
+        break;
+    }
+    case 1: break;  // TerminateAllLibraryApplets
+    case 2: OUT(uint8_t, 0) = 0; resp_size(resp, 1); break;  // AreAnyLibraryAppletsLeft
+    case 10: case 11: case 12: {  // CreateStorage / CreateTransferMemoryStorage / CreateHandleStorage
+        int64_t sz = IN(int64_t, 0);
+        if (sz <= 0) sz = 0x1000;
+        if (sz > 16 * 1024 * 1024) sz = 16 * 1024 * 1024;
+        ipc_return_object(resp, new_am_storage(NULL, (uint64_t)sz));
+        break;
+    }
+    default: UNHANDLED("ILibraryAppletCreator");
+    }
 }
 
 extern const uint8_t g_user_id[16];
@@ -180,7 +259,7 @@ static void application_proxy(Service *s, IpcReq *req, IpcResp *resp) {
         {3, "IAudioController", generic_ok},
         {4, "IDisplayController", generic_ok},
         {10, "IProcessWindingController", generic_ok},
-        {11, "ILibraryAppletCreator", generic_ok},
+        {11, "ILibraryAppletCreator", library_applet_creator},
         {20, "IApplicationFunctions", application_functions},
         {1000, "IDebugFunctions", generic_ok},
     };

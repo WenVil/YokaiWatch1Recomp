@@ -30,6 +30,7 @@ bool controls_ui_took_back(void);
 #include "../paths.h"
 #include "../platform.h"
 #include "../game_addresses.h"
+#include "../romfs_build.h"
 }
 #include <time.h>
 
@@ -157,6 +158,15 @@ extern "C" bool menu_input_captured(void) { return capturing(); }
 
 static bool vpad_on(void);  // (the on-screen pad wants the mouse even when no menu is up: defined below)
 
+static void cycle_game_speed(void) {
+    if (rt_speed_locked_by_env()) return;
+    uint32_t pct = rt_speed_pct();
+    uint32_t next = (pct < 150) ? 150 : (pct < 200) ? 200 : (pct < 300) ? 300 : 100;
+    rt_set_speed_pct(next);
+    g_settings.speed_pct = (int)next;
+    settings_save();
+}
+
 bool menu_handle_event(const SDL_Event *e) {
     static bool back_down, start_down;
     if (g_open.load() && bind_capture_event(e)) return true;  // Controls tab waiting for a new binding: it takes the press
@@ -188,8 +198,7 @@ bool menu_handle_event(const SDL_Event *e) {
         }
         if (!e->key.repeat && !typing && g_settings.hotkey_speed > 0 &&
             e->key.scancode == (SDL_Scancode)g_settings.hotkey_speed) {
-            uint64_t m = rt_speed_mult();
-            rt_set_speed_mult(m == 1 ? 2 : m == 2 ? 3 : 1);
+            cycle_game_speed();
             return true;
         }
         if (!e->key.repeat && !typing &&
@@ -226,6 +235,10 @@ bool menu_handle_event(const SDL_Event *e) {
         if (e->gbutton.button == SDL_GAMEPAD_BUTTON_START) start_down = down;
         if (down && !typing && ((back_down && start_down) || e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE)) {
             set_open(!g_open.load());
+            return true;
+        }
+        if (down && !typing && back_down && e->gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
+            cycle_game_speed();
             return true;
         }
         if (!capturing()) return false;
@@ -400,6 +413,11 @@ static void tab_display(float scale) {
                    ui_tr(STR_OPT_ASPECT_DESC), false)) {
         settings_save();
     }
+    const char *res_scales[3] = {ui_tr(STR_RES_SCALE_1X), ui_tr(STR_RES_SCALE_1_5X), ui_tr(STR_RES_SCALE_2X)};
+    if (opt_choice(ui_tr(STR_OPT_RES_SCALE), &g_settings.res_scale, res_scales, 3, RES_SCALE_1X,
+                   ui_tr(STR_OPT_RES_SCALE_DESC), true)) {
+        settings_save();
+    }
     const char *vsync_opts[3] = {ui_tr(STR_VSYNC_MAILBOX), ui_tr(STR_VSYNC_FIFO), ui_tr(STR_VSYNC_IMMEDIATE)};
     if (opt_choice(ui_tr(STR_OPT_VSYNC), &g_settings.vsync_mode, vsync_opts, 3, VSYNC_MAILBOX,
                    ui_tr(STR_OPT_VSYNC_DESC), false)) {
@@ -415,14 +433,20 @@ static void tab_display(float scale) {
         settings_save();
     }
     {
-        const char *spd_opts[3] = {ui_tr(STR_SPEED_1X), ui_tr(STR_SPEED_2X), ui_tr(STR_SPEED_3X)};
-        uint64_t cur_spd = rt_speed_mult();
-        int sp_idx = cur_spd >= 3 ? 2 : cur_spd == 2 ? 1 : 0;
+        const char *spd_opts[4] = {
+            ui_tr(STR_SPEED_1X), ui_tr(STR_SPEED_1_5X), ui_tr(STR_SPEED_2X), ui_tr(STR_SPEED_3X)
+        };
+        static const int k_pcts[4] = {100, 150, 200, 300};
+        uint32_t cur_pct = rt_speed_pct();
+        int sp_idx = cur_pct >= 300 ? 3 : cur_pct >= 200 ? 2 : cur_pct >= 150 ? 1 : 0;
         bool env_locked = rt_speed_locked_by_env();
         if (env_locked) opt_disable_next();
-        if (opt_choice(ui_tr(STR_OPT_SPEED), &sp_idx, spd_opts, 3, 0,
+        if (opt_choice(ui_tr(STR_OPT_SPEED), &sp_idx, spd_opts, 4, 0,
                        env_locked ? ui_tr(STR_OPT_SPEED_DESC_LOCKED) : ui_tr(STR_OPT_SPEED_DESC), false)) {
-            rt_set_speed_mult(sp_idx == 2 ? 3 : sp_idx == 1 ? 2 : 1);
+            int np = k_pcts[sp_idx >= 0 && sp_idx < 4 ? sp_idx : 0];
+            rt_set_speed_pct((uint32_t)np);
+            g_settings.speed_pct = np;
+            settings_save();
         }
     }
     opt_end();
@@ -518,6 +542,27 @@ static void tab_system(float scale, bool in_game) {
                 snprintf(save_msg, sizeof save_msg, "%s%s", ui_tr(STR_BACKUP_OK_PFX), rel);
             else
                 snprintf(save_msg, sizeof save_msg, "%s%s", ui_tr(STR_BACKUP_FAIL_PFX), err);
+        }
+    }
+
+    opt_section(ui_tr(STR_SEC_MODS));
+    {
+        int active_mods = fs_mods_count();
+        char mod_stat[256];
+        if (g_settings.mods_enabled)
+            snprintf(mod_stat, sizeof mod_stat, ui_tr(STR_MODS_STATUS_ACTIVE_FMT), active_mods);
+        else
+            snprintf(mod_stat, sizeof mod_stat, "%s", ui_tr(STR_MODS_STATUS_DISABLED));
+        std::string mdesc = std::string(ui_tr(STR_OPT_MODS_ENABLE_DESC)) + "\n\n" + mod_stat;
+        if (opt_toggle(ui_tr(STR_OPT_MODS_ENABLE), &g_settings.mods_enabled, true, mdesc.c_str())) {
+            settings_save();
+        }
+        char mdir[1100];
+        fs_mods_dir(mdir, sizeof mdir);
+        std::string open_desc = std::string(mdir) + "\n\n" + mod_stat;
+        if (opt_button(ui_tr(STR_BTN_OPEN_MODS), open_desc.c_str())) {
+            plat_mkdir_p(mdir);
+            plat_open_folder(mdir);
         }
     }
 
@@ -970,7 +1015,7 @@ static void vpad_draw(float scale) {
 // Whether menu_render draws anything: the menu, the keyboard, an overlay (FPS, inventory, tracker, chaos, race, a
 // pickup card) or the on-screen pad.
 static bool render_needed(bool open, bool kbd) {
-    return open || kbd || g_settings.hud_mode != HUD_OFF || g_settings.show_fps || rt_speed_mult() > 1 || vpad_on();
+    return open || kbd || g_settings.hud_mode != HUD_OFF || g_settings.show_fps || rt_speed_pct() > 100 || vpad_on();
 }
 
 extern "C" bool menu_prepare_frame(uint32_t target_h, bool loading) {
@@ -1028,7 +1073,8 @@ void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_
     if (g_ov_cache < 0) g_ov_cache = !getenv("LARECOMP_OVERLAY_CACHE") || atoi(getenv("LARECOMP_OVERLAY_CACHE")) != 0;
     if (vpad_on()) g_ov_cache = 0;
     int hud_mode = g_settings.hud_mode != HUD_OFF ? g_settings.hud_mode : (g_settings.show_fps ? HUD_FPS : HUD_OFF);
-    uint64_t spd_mult = rt_speed_mult();
+    uint32_t req_spd_pct = rt_speed_pct();
+    uint32_t eff_spd_pct = rt_effective_speed_pct();
     if (g_ov_cache) fps_note(now, io.DeltaTime);
 
     uint64_t total_draws = 0, gl_errs = 0;
@@ -1087,12 +1133,18 @@ void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_
         ImGui::End();
     }
 
-    if (!loading && spd_mult > 1) {
+    if (!loading && req_spd_pct > 100) {
         ImGui::SetNextWindowPos(ImVec2(16 * scale, 16 * scale), 0, ImVec2(0, 0));
         ImGui::SetNextWindowBgAlpha(0.6f);
         ImGui::Begin("##speed", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                           ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
-        ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.30f, 1.0f), ui_tr(STR_SPEED_BADGE_FMT), (unsigned long long)spd_mult);
+        if (eff_spd_pct > 100) {
+            ImGui::TextColored(ImVec4(0.98f, 0.80f, 0.30f, 1.0f), ui_tr(STR_SPEED_BADGE_FMT),
+                               (double)eff_spd_pct / 100.0);
+        } else {
+            ImGui::TextColored(ImVec4(0.55f, 0.86f, 0.98f, 1.0f), ui_tr(STR_SPEED_MOVIE_PAUSED_FMT),
+                               (double)req_spd_pct / 100.0);
+        }
         ImGui::End();
     }
 

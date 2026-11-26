@@ -49,8 +49,11 @@ void rt_svc(Cpu *c, uint32_t imm, uint64_t pc);
 void rt_brk(Cpu *c, uint32_t imm, uint64_t pc) __attribute__((noreturn));
 void rt_udf(Cpu *c, uint64_t pc) __attribute__((noreturn));
 uint64_t rt_ticks(void);
-uint64_t rt_speed_mult(void);  // LARECOMP_SPEED_MULT or dynamic runtime hotkey: guest time runs this much faster (1: normal)
+uint64_t rt_speed_mult(void);  // effective integer speed multiplier (1 during normal playback/movies)
 void rt_set_speed_mult(uint64_t m);
+uint32_t rt_speed_pct(void);            // requested speed in percent (100/150/200/300)
+uint32_t rt_effective_speed_pct(void);  // 100 during cutscene movies, else rt_speed_pct()
+void rt_set_speed_pct(uint32_t pct);
 bool rt_speed_locked_by_env(void);
 
 #if defined(__aarch64__)

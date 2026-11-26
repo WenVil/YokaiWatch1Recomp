@@ -25,6 +25,17 @@ static uint32_t new_event_handle(void) {
     return r;
 }
 
+static void nfp_list_dummy_device(IpcReq *req, IpcResp *resp) {
+    IpcBuf *b = out_buf(req, 0);
+    int n = 0;
+    if (b && b->addr && b->size >= 8) {
+        memset((void *)(uintptr_t)b->addr, 0, 8);  // device handle 0 (player 1 controller)
+        n = 1;
+    }
+    OUT(uint32_t, 0) = (uint32_t)n;
+    resp_size(resp, 4);
+}
+
 static void nfp_iuser(Service *s, IpcReq *req, IpcResp *resp) {
     (void)s;
     NfpUser *u = &g_nfp;
@@ -37,17 +48,9 @@ static void nfp_iuser(Service *s, IpcReq *req, IpcResp *resp) {
         u->state = NFP_STATE_NONE;
         u->dev_state = DEV_INITIALIZED;
         break;
-    case 2: {  // ListDevices -> one NFC reader (the controller), so the game can search and time out / cancel
-        IpcBuf *b = out_buf(req, 0);
-        int n = 0;
-        if (b && b->addr && b->size >= 8) {
-            memset((void *)(uintptr_t)b->addr, 0, 8);  // device handle 0 (player 1 controller)
-            n = 1;
-        }
-        OUT(uint32_t, 0) = (uint32_t)n;
-        resp_size(resp, 4);
+    case 2:  // ListDevices -> one NFC reader (the controller), so the game can search and time out / cancel
+        nfp_list_dummy_device(req, resp);
         break;
-    }
     case 3:  // StartDetection
         u->dev_state = DEV_SEARCHING;
         break;
@@ -92,3 +95,42 @@ SERVICE("nfp:user", nfp_user) {
     }
     LOG("[nfp] IUserManager cmd %u (ok)\n", req->cmd);
 }
+
+// nfc:user / nfc:sys / nfc:mf:u (raw NFC / MIFARE / Yo-kai Medal reader interface)
+#define NFC_RESULT(desc) (0x72u | ((uint32_t)(desc) << 9))
+#define NFC_DEVICE_NOT_FOUND NFC_RESULT(64)
+static NfpUser g_nfc;
+
+static void nfc_iface(Service *s, IpcReq *req, IpcResp *resp) {
+    switch (req->cmd) {
+    case 0: g_nfc.state = NFP_STATE_INITIALIZED; g_nfc.dev_state = DEV_INITIALIZED; break;  // Initialize
+    case 1: g_nfc.state = NFP_STATE_NONE; g_nfc.dev_state = DEV_INITIALIZED; break;         // Finalize
+    case 2: OUT(uint32_t, 0) = (uint32_t)g_nfc.state; resp_size(resp, 4); break;            // GetState
+    case 3: OUT(uint8_t, 0) = 1; resp_size(resp, 1); break;                                 // IsNfcEnabled
+    case 100: break;                                                                        // SetNfcEnabled (nfc:sys)
+    case 400: nfp_list_dummy_device(req, resp); break;                                      // ListDevices
+    case 401: g_nfc.dev_state = DEV_SEARCHING; break;                                       // StartDetection
+    case 402: g_nfc.dev_state = DEV_INITIALIZED; break;                                     // StopDetection
+    case 403: case 405: case 406: case 407: case 408: case 1001: case 1002:                 // tag I/O ops
+        resp->result = NFC_DEVICE_NOT_FOUND;
+        break;
+    case 404: OUT(uint32_t, 0) = (uint32_t)g_nfc.dev_state; resp_size(resp, 4); break;      // GetDeviceState
+    case 1000: resp->copy_handles[resp->ncopy++] = new_event_handle(); break;               // AttachAvailabilityChangeEvent
+    default:
+        LOG("[nfc] %s cmd %u (ok)\n", s->name, req->cmd);
+        resp_size(resp, 0x10);
+    }
+}
+
+static void nfc_root(Service *s, IpcReq *req, IpcResp *resp, const char *iface_name) {
+    (void)s;
+    if (req->cmd == 0) {
+        ipc_return_object(resp, service_new(iface_name, nfc_iface, NULL));
+        return;
+    }
+    LOG("[nfc] root cmd %u (ok)\n", req->cmd);
+}
+
+SERVICE("nfc:user", nfc_user) { nfc_root(s, req, resp, "nfc:IUser"); }
+SERVICE("nfc:sys", nfc_sys) { nfc_root(s, req, resp, "nfc:ISystem"); }
+SERVICE("nfc:mf:u", nfc_mf_u) { nfc_root(s, req, resp, "nfc:mf:IUser"); }

@@ -179,8 +179,8 @@ static const Entry k_table[STR_COUNT] = {
     {"1x 正常", "1x 正常", "1x Normal", "1x 通常", "1x 보통"},
     {"2x 快进", "2x 快進", "2x Fast", "2x 早送り", "2x 배속"},
     {"3x 快进", "3x 快進", "3x Fast", "3x 早送り", "3x 배속"},
-    {"动态调整运行倍速（默认 F3 切换）。开启快进时将自动静音，仅加速运行节奏。", "動態調整運行倍速（預設 F3 切換）。開啟快進時將自動靜音，僅加速運行節奏。", "Adjusts runtime speed dynamically (default hotkey F3). Audio automatically mutes while fast-forwarding.", "実行速度を変更します（F3で切替）。早送り中は自動的にミュートになります。", "실행 배속을 전환합니다(기본 단축키 F3). 배속 중에는 자동으로 음소거됩니다."},
-    {"当前已通过环境变量 LARECOMP_SPEED_MULT 锁定倍速。快进期间将自动静音。", "當前已透過環境變數 LARECOMP_SPEED_MULT 鎖定倍速。快進期間將自動靜音。", "Speed is currently locked via LARECOMP_SPEED_MULT environment variable.", "環境変数 LARECOMP_SPEED_MULT により倍率が固定されています。", "환경 변수 LARECOMP_SPEED_MULT에 의해 배속이 고정되어 있습니다."},
+    {"动态调整运行倍速（默认 F3 或手柄 Back+R1 切换）。播放过场影片时自动恢复 1.0x 原速；快进期间自动静音。", "動態調整運行倍速（預設 F3 或手把 Back+R1 切換）。播放過場影片時自動恢復 1.0x 原速；快進期間自動靜音。", "Adjusts runtime speed dynamically (F3 or Back+R1). Cutscenes stay at 1.0x; audio mutes while fast-forwarding.", "実行速度を変更します（F3 / Back+R1）。ムービー中は自動で 1.0x に戻り、早送り中はミュートになります。", "실행 배속을 전환합니다(F3 또는 Back+R1). 컷신 재생 시 1.0x를 유지하며 배속 중 음소거됩니다."},
+    {"当前已通过环境变量（YW1_SPEED / LARECOMP_SPEED_MULT）锁定倍速。快进期间将自动静音。", "當前已透過環境變數（YW1_SPEED / LARECOMP_SPEED_MULT）鎖定倍速。快進期間將自動靜音。", "Speed is currently locked via YW1_SPEED / LARECOMP_SPEED_MULT environment variable.", "環境変数 YW1_SPEED / LARECOMP_SPEED_MULT により倍率が固定されています。", "환경 변수 YW1_SPEED / LARECOMP_SPEED_MULT에 의해 배속이 고정되어 있습니다."},
 
     // Audio Tab
     {"声音与输出", "聲音與輸出", "Sound & Output", "サウンド設定", "사운드 및 출력"},
@@ -297,7 +297,8 @@ static const Entry k_table[STR_COUNT] = {
     {"帧耗时: %.1f ms (最大 %.0f ms)", "幀耗時: %.1f ms (最大 %.0f ms)", "Frame: %.1f ms (max %.0f ms)", "フレーム: %.1f ms (最大 %.0f ms)", "프레임: %.1f ms (최대 %.0f ms)"},
     {"绘制: %llu 次/帧", "繪製: %llu 次/幀", "Draws: %llu /frame", "描画数: %llu /フレーム", "드로우: %llu /프레임"},
     {"等待: %.2f ms/帧", "等待: %.2f ms/幀", "Wait: %.2f ms/frame", "待機: %.2f ms/フレーム", "대기: %.2f ms/프레임"},
-    {"%llux 快进（已静音）", "%llux 快進（已靜音）", "%llux Speed (Muted)", "%llux 早送り (消音中)", "%llux 배속 (음소거)"},
+    {"%.1fx 快进（已静音）", "%.1fx 快進（已靜音）", "%.1fx Speed (Muted)", "%.1fx 早送り (消音中)", "%.1fx 배속 (음소거)"},
+    {"1.0x 动画保护（已设 %.1fx）", "1.0x 動畫保護（已設 %.1fx）", "1.0x Cutscene (Paused %.1fx)", "1.0x ムービー保護 (設定 %.1fx)", "1.0x 컷신 보호 (설정 %.1fx)"},
     {"[十字键/左摇杆] 移动   [LB/RB] 切换标签   [%s] 确认   [%s] 返回", "[十字鍵/左搖桿] 移動   [LB/RB] 切換分頁   [%s] 確認   [%s] 返回", "[D-Pad / L-Stick] Move   [LB / RB] Switch Tab   [%s] Confirm   [%s] Back", "[十字キー/左スティック] 移動   [LB/RB] タブ切替   [%s] 決定   [%s] 戻る", "[십자키/왼쪽 스틱] 이동   [LB/RB] 탭 전환   [%s] 확인   [%s] 뒤로"},
 
     // Local self-build progress & status
@@ -307,7 +308,24 @@ static const Entry k_table[STR_COUNT] = {
     {"× 本地构建失败：", "× 本地構建失敗：", "× Local build failed: ", "× 構築に失敗しました: ", "× 로컬 빌드 실패: "},
     {"× 本机构建工具链不完整（缺少 lasgen / zig / YokaiWatch1Recomp.dll.a）。请确认发布包完整。", "× 本機構建工具鏈不完整（缺少 lasgen / zig / YokaiWatch1Recomp.dll.a）。請確認發佈包完整。", "× Local build toolchain incomplete (missing lasgen / zig / YokaiWatch1Recomp.dll.a).", "× ビルドツールチェーンが見つかりません (lasgen / zig / implib)。", "× 로컬 빌드 도구가 누락되었습니다 (lasgen / zig / YokaiWatch1Recomp.dll.a)."},
     {"提示：本发行包未内置 .nsp/.xci 解包器，请直接选择已解包的 exefs/romfs 文件夹。", "提示：本發佈包未內建 .nsp/.xci 解包器，請直接選擇已解包的 exefs/romfs 資料夾。", "Note: No package extractor is bundled; please select an already-extracted exefs/romfs folder.", "注: パッケージ展開ツールは同梱されていません。展開済みの exefs/romfs フォルダを直接選択してください。", "안내: 패키지 추출 도구가 포함되지 않았습니다. 추출된 exefs/romfs 폴더를 직접 선택하세요."},
+
+    // Phase 2C: Resolution Scale, 1.5x Speed, & LayeredFS Mods
+    {"内部分辨率（需重启）", "內部解析度（需重啟）", "Internal Resolution (Restart)", "内部解像度 (再起動で反映)", "내부 해상도 (재시작 필요)"},
+    {"1.0x (1080p 原生)", "1.0x (1080p 原生)", "1.0x (1080p Native)", "1.0x (1080p 標準)", "1.0x (1080p 기본)"},
+    {"1.5x (1620p)", "1.5x (1620p)", "1.5x (1620p)", "1.5x (1620p)", "1.5x (1620p)"},
+    {"2.0x (2160p 4K)", "2.0x (2160p 4K)", "2.0x (2160p 4K)", "2.0x (2160p 4K)", "2.0x (2160p 4K)"},
+    {"提高 3D 渲染内部分辨率（1.0x=1920x1080，1.5x=2880x1620，2.0x=3840x2160），自动保留阴影与影片原生尺寸；重启游戏后生效。", "提高 3D 渲染內部解析度（1.0x=1920x1080，1.5x=2880x1620，2.0x=3840x2160），自動保留陰影與影片原生尺寸；重啟遊戲後生效。", "Scales 3D internal rendering (1.0x=1080p, 1.5x=1620p, 2.0x=4K) while preserving shadow maps and movies; requires restart.", "3D レンダリング内部解像度を変更します (1080p / 1620p / 4K)。シャドウとムービーは等倍維持。再起動後に反映されます。", "3D 내부 해상도를 조절합니다(1080p / 1620p / 4K). 그림자 및 동영상은 원본 크기 유지. 재시작 시 적용됩니다."},
+    {"1.5x 轻度快进", "1.5x 輕度快進", "1.5x Mild", "1.5x 軽快", "1.5x 약간 빠름"},
+    {"Mod 覆盖层 (LayeredFS)", "Mod 覆蓋層 (LayeredFS)", "Mods (LayeredFS)", "Mod オーバーレイ (LayeredFS)", "모드 오버레이 (LayeredFS)"},
+    {"启用 mods/ 资源覆盖", "啟用 mods/ 資源覆蓋", "Enable mods/ Overlay", "mods/ オーバーレイを有効化", "mods/ 오버레이 활성화"},
+    {"按字母顺序加载数据目录 mods/<名称>/romfs/ 中的替换与新增资源文件；修改后重启游戏生效。", "按字母順序載入資料目錄 mods/<名稱>/romfs/ 中的替換與新增資源檔案；修改後重啟遊戲生效。", "Overlays replacement and new files from <data_root>/mods/<name>/romfs/ in alphabetical order; requires restart.", "データフォルダ内の mods/<名前>/romfs/ を昇順で適用します。変更は再起動後に反映されます。", "데이터 경로 mods/<이름>/romfs/의 교체 및 추가 파일을 이름순으로 적용합니다. 재시작 시 반영됩니다."},
+    {"打开 Mods 目录", "開啟 Mods 目錄", "Open Mods Folder", "Mods フォルダを開く", "Mods 폴더 열기"},
+    {"当前已启用 %d 个 Mod（启动或重启游戏时自动挂载）。", "目前已啟用 %d 個 Mod（啟動或重啟遊戲時自動掛載）。", "%d active mod(s) ready to overlay at game boot.", "有効な Mod: %d 件（起動時に自動マウントされます）。", "활성 모드: %d개 (게임 시작 시 자동 적용)."},
+    {"当前已禁用 Mod 覆盖层。", "目前已停用 Mod 覆蓋層。", "Mod overlay is currently disabled.", "Mod オーバーレイは無効になっています。", "모드 오버레이가 현재 비활성화되어 있습니다."},
+    {"Mods: %d 个已启用", "Mods: %d 個已啟用", "Mods: %d active", "Mods: %d 件有効", "Mods: %d개 활성"},
 };
+
+static_assert(sizeof(k_table) / sizeof(k_table[0]) == STR_COUNT, "k_table must match UiStr count");
 
 }  // namespace
 

@@ -53,9 +53,12 @@ Settings g_settings = {
 #endif
     .window_mode = WIN_WINDOWED,
     .output_res = OUT_RES_AUTO,
+    .res_scale = RES_SCALE_1X,
     .aspect_mode = ASPECT_MODE_LOCK_16_9,
     .vsync_mode = VSYNC_MAILBOX,
     .hud_mode = HUD_OFF,
+    .speed_pct = 100,
+    .mods_enabled = true,
     .mute_unfocused = false,
     .audio_channels = AUDIO_CH_AUTO,
     .ls_deadzone = 12,
@@ -179,7 +182,7 @@ const char *settings_game_lang_code(void) {
     default: break;
     }
     const GameVersion *gv = game_version();
-    if (gv && !strcmp(gv->key, "vyw1_jp_v1_3_0")) {
+    if (gv && !strncmp(gv->key, "vyw1_", 5)) {
         return "ja";
     }
     switch (settings_resolved_ui_lang()) {
@@ -206,6 +209,7 @@ const char *settings_language_name(void) {
 
 static const char *const k_window_modes[] = {"windowed", "borderless", "exclusive"};
 static const char *const k_output_res[] = {"auto", "720p", "1080p", "1440p", "4k"};
+static const char *const k_res_scales[] = {"1x", "1.5x", "2x"};
 static const char *const k_aspect_modes[] = {"16:9", "stretch"};
 static const char *const k_vsync_modes[] = {"mailbox", "fifo", "immediate"};
 static const char *const k_hud_modes[] = {"off", "fps", "detailed"};
@@ -261,9 +265,20 @@ void settings_load(void) {
         if (!strcmp(key, "fullscreen")) { g_settings.fullscreen = atoi(val) != 0; seen_fs = true; }
         else if (!strcmp(key, "window_mode")) { g_settings.window_mode = parse_choice(val, k_window_modes, 3, WIN_WINDOWED); seen_win_mode = true; }
         else if (!strcmp(key, "output_res")) g_settings.output_res = parse_choice(val, k_output_res, 5, OUT_RES_AUTO);
+        else if (!strcmp(key, "res_scale")) {
+            if (!strcmp(val, "1.5x") || !strcmp(val, "150")) g_settings.res_scale = RES_SCALE_1_5X;
+            else if (!strcmp(val, "2x") || !strcmp(val, "200")) g_settings.res_scale = RES_SCALE_2X;
+            else g_settings.res_scale = parse_choice(val, k_res_scales, 3, RES_SCALE_1X);
+        }
         else if (!strcmp(key, "aspect_mode")) g_settings.aspect_mode = parse_choice(val, k_aspect_modes, 2, ASPECT_MODE_LOCK_16_9);
         else if (!strcmp(key, "vsync_mode")) g_settings.vsync_mode = parse_choice(val, k_vsync_modes, 3, VSYNC_MAILBOX);
         else if (!strcmp(key, "hud_mode")) { g_settings.hud_mode = parse_choice(val, k_hud_modes, 3, HUD_OFF); seen_hud_mode = true; }
+        else if (!strcmp(key, "game_speed")) {
+            double sp = atof(val);
+            int pct = (int)(sp * 100.0 + 0.5);
+            g_settings.speed_pct = (pct >= 275) ? 300 : (pct >= 175) ? 200 : (pct >= 125) ? 150 : 100;
+        }
+        else if (!strcmp(key, "mods_enabled")) g_settings.mods_enabled = atoi(val) != 0;
         else if (!strcmp(key, "volume")) g_settings.volume = (float)atof(val);
         else if (!strcmp(key, "reverb")) g_settings.reverb = atoi(val) != 0;
         else if (!strcmp(key, "movie_audio")) g_settings.movie_audio = atoi(val) != 0;
@@ -341,9 +356,12 @@ void settings_save(void) {
     fprintf(f, "window_mode = %s\n", k_window_modes[clamp_int(g_settings.window_mode, 0, 2)]);
     fprintf(f, "fullscreen = %d\n", g_settings.window_mode != WIN_WINDOWED ? 1 : 0);
     fprintf(f, "output_res = %s\n", k_output_res[clamp_int(g_settings.output_res, 0, 4)]);
+    fprintf(f, "res_scale = %s\n", k_res_scales[clamp_int(g_settings.res_scale, 0, 2)]);
     fprintf(f, "aspect_mode = %s\n", k_aspect_modes[clamp_int(g_settings.aspect_mode, 0, 1)]);
     fprintf(f, "vsync_mode = %s\n", k_vsync_modes[clamp_int(g_settings.vsync_mode, 0, 2)]);
     fprintf(f, "hud_mode = %s\n", k_hud_modes[clamp_int(g_settings.hud_mode, 0, 2)]);
+    fprintf(f, "game_speed = %.1fx\n", (double)(g_settings.speed_pct >= 100 ? g_settings.speed_pct : 100) / 100.0);
+    fprintf(f, "mods_enabled = %d\n", g_settings.mods_enabled ? 1 : 0);
     fprintf(f, "volume = %.2f\n", g_settings.volume);
     fprintf(f, "reverb = %d\n", g_settings.reverb);
     fprintf(f, "movie_audio = %d\n", g_settings.movie_audio);

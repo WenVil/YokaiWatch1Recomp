@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "../hle.h"
+#include "../romfs_build.h"
 #include "../settings.h"
 #include "../gl/gl_backend.h"
 
@@ -517,7 +518,7 @@ static void ex_set_data_source(Cpu *c) {
     // "rom:/region_common/movie/title.webm" -> extracted/romfs/region_common/movie/title.webm
     const char *rel = path && strstr(path, ":/") ? strstr(path, ":/") + 2 : path;
     char host[1024];
-    snprintf(host, sizeof host, "%s/%s", g_romfs_dir, rel ? rel : "");
+    fs_resolve_romfs_file(rel ? rel : "", host, sizeof host, NULL);
     LOG("[movie] open %s -> %s\n", path ? path : "(null)", host);
     if (avformat_open_input(&e->fmt, host, NULL, NULL) < 0 || avformat_find_stream_info(e->fmt, NULL) < 0) {
         LOG("[movie] cannot open %s\n", host);
@@ -724,8 +725,27 @@ typedef struct {
     bool eos_pending;
     int64_t eos_time;
     bool stopped;  // Stop / destroyed: no more events (see dec_stop)
+    bool playing;  // Active video playback session (counted in g_movie_video_playing)
     pthread_mutex_t lock;
 } Decoder;
+
+static int g_movie_video_playing;
+
+bool movie_is_playing(void) {
+    return __atomic_load_n(&g_movie_video_playing, __ATOMIC_ACQUIRE) > 0;
+}
+
+static void dec_mark_playing(Decoder *d, bool active) {
+    if (!d || !d->video || d->playing == active) return;
+    d->playing = active;
+    if (active) {
+        int n = __atomic_add_fetch(&g_movie_video_playing, 1, __ATOMIC_RELEASE);
+        if (n == 1 && rt_speed_pct() > 100) LOG("[movie] cutscene active: pausing speedhack -> 1.0x\n");
+    } else {
+        int n = __atomic_sub_fetch(&g_movie_video_playing, 1, __ATOMIC_RELEASE);
+        if (n == 0 && rt_speed_pct() > 100) LOG("[movie] cutscene ended: resuming speedhack (%u%%)\n", rt_speed_pct());
+    }
+}
 
 // Input / output buffers live in the HLE heap, which only a reboot frees: buffers of destroyed decoders are kept
 // for the next movie (the title's attract loop replays the opening, ~37 MB of buffers per showing).
@@ -824,6 +844,7 @@ static void dec_start(Cpu *c) {
     Decoder *d = self_state(c);
     pthread_mutex_lock(&d->lock);
     d->stopped = false;
+    dec_mark_playing(d, true);
     pthread_mutex_unlock(&d->lock);
     dec_signal(c, d, 0);  // all input buffers are free
     c->x[0] = 0;
@@ -839,6 +860,7 @@ static void dec_stop(Cpu *c) {
     static uint64_t clear_event;
     if (!clear_event) clear_event = guest_sym("_ZN2nn2os10ClearEventEPNS0_9EventTypeE");
     pthread_mutex_lock(&d->lock);
+    dec_mark_playing(d, false);
     if (!d->stopped) {
         d->stopped = true;
         LOG("[movie] decoder %s stopped\n", d->video ? "video" : "audio");
@@ -1101,6 +1123,7 @@ RT_ON_RESET(movie_reset) {
         if (d) dec_free(d);
         g_movie_objs[0][i] = g_movie_objs[1][i] = NULL;
     }
+    __atomic_store_n(&g_movie_video_playing, 0, __ATOMIC_RELEASE);
     g_ex_vt = g_dec_vt = 0;
     g_nbuf_pool = 0;  // (the HLE heap starts over)
     g_skip_held = false, g_skip_pressed_at = 0;

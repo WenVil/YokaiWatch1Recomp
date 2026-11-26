@@ -14,16 +14,16 @@ uint64_t g_native_window;
 
 static void *vsync_thread(void *arg) {
     (void)arg;
-    uint64_t prev_m = rt_speed_mult();
-    uint64_t period = 16666667ull / (prev_m > 1 ? prev_m : 1);
+    uint32_t prev_pct = rt_effective_speed_pct();
+    uint64_t period = (16666667ull * 100ull) / (prev_pct ? prev_pct : 100u);
     plat_thread_realtime(period);
     plat_thread_perf_core(PLAT_PERF_VSYNC);
     uint64_t next = plat_now_ns();
     for (;;) {
-        uint64_t m = rt_speed_mult();
-        period = 16666667ull / (m > 1 ? m : 1);
-        if (m != prev_m) {
-            prev_m = m;
+        uint32_t pct = rt_effective_speed_pct();
+        period = (16666667ull * 100ull) / (pct ? pct : 100u);
+        if (pct != prev_pct) {
+            prev_pct = pct;
             next = plat_now_ns();
             plat_thread_realtime(period);
         }

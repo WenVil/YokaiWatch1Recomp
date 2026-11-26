@@ -18,8 +18,10 @@
 #include "../hle.h"
 #include "../ipc.h"
 #include "../game_addresses.h"
+#include "../paths.h"
 #include "../platform.h"
 #include "../romfs_build.h"
+#include "../settings.h"
 
 #define FS_PATH_NOT_FOUND MAKE_RESULT(2, 1)
 #define FS_PATH_EXISTS MAKE_RESULT(2, 2)
@@ -108,11 +110,213 @@ static void base_close(void) {
     g_base_open = false;
 }
 
+#define MODS_SCAN_MAX 64
+
+typedef struct {
+    char name[256];
+    char romfs[1100];
+} ModRomfsItem;
+
+static int cmp_mod_item(const void *a, const void *b) {
+    return strcmp(((const ModRomfsItem *)a)->name, ((const ModRomfsItem *)b)->name);
+}
+
+static int cmp_layered_entry(const void *a, const void *b) {
+    return strcmp(((const FsLayeredEntry *)a)->name, ((const FsLayeredEntry *)b)->name);
+}
+
+void fs_mods_dir(char *out, size_t cap) {
+    if (!out || cap == 0) return;
+    const char *env_dir = getenv("YW1_MODS_DIR");
+    if (env_dir && *env_dir) {
+        snprintf(out, cap, "%s", env_dir);
+        return;
+    }
+    const char *dr = rt_data_root();
+    if (dr && *dr) snprintf(out, cap, "%s/mods", dr);
+    else snprintf(out, cap, "mods");
+}
+
+bool fs_mods_enabled(void) {
+    const char *env = getenv("YW1_MODS");
+    if (env && *env) return atoi(env) != 0;
+    return g_settings.mods_enabled;
+}
+
+static int collect_mod_romfs(bool honor_enabled, ModRomfsItem *items, int max_items) {
+    if (honor_enabled && !fs_mods_enabled()) return 0;
+    char mods_dir[1100];
+    fs_mods_dir(mods_dir, sizeof mods_dir);
+    PlatDir *d = plat_opendir(mods_dir);
+    if (!d) return 0;
+    int count = 0;
+    char ename[256];
+    bool is_d = false;
+    while (plat_readdir(d, ename, sizeof ename, &is_d, NULL) && count < max_items) {
+        if (!is_d || ename[0] == '.' || ename[0] == '_') continue;
+        char mod_root[1100], romfs_sub[1100];
+        snprintf(mod_root, sizeof mod_root, "%s/%s", mods_dir, ename);
+        if (!rt_find_subdir_icase(mod_root, "romfs", romfs_sub, sizeof romfs_sub)) continue;
+        snprintf(items[count].name, sizeof items[count].name, "%s", ename);
+        snprintf(items[count].romfs, sizeof items[count].romfs, "%s", romfs_sub);
+        count++;
+    }
+    plat_closedir(d);
+    if (count > 1) qsort(items, count, sizeof items[0], cmp_mod_item);
+    return count;
+}
+
+int fs_mods_count(void) {
+    ModRomfsItem items[MODS_SCAN_MAX];
+    return collect_mod_romfs(true, items, MODS_SCAN_MAX);
+}
+
+int fs_list_active_mod_romfs(char out_romfs[][1100], char out_names[][256], int max_mods) {
+    ModRomfsItem items[MODS_SCAN_MAX];
+    int total = collect_mod_romfs(true, items, MODS_SCAN_MAX);
+    int n = total < max_mods ? total : max_mods;
+    for (int i = 0; i < n; i++) {
+        if (out_romfs) snprintf(out_romfs[i], 1100, "%s", items[i].romfs);
+        if (out_names) snprintf(out_names[i], 256, "%s", items[i].name);
+    }
+    return n;
+}
+
+static const char *clean_rel_path(const char *rel) {
+    if (!rel) return "";
+    while (*rel == '/' || *rel == '\\') rel++;
+    if (strstr(rel, "..")) return NULL;
+    return rel;
+}
+
+static bool join_romfs_sub(const char *base, const char *rel, char *out, size_t cap) {
+    if (!rel || !*rel) snprintf(out, cap, "%s", base);
+    else snprintf(out, cap, "%s/%s", base, rel);
+    return true;
+}
+
+static bool resolve_layered_entry(const char *rel, bool allow_dirs, char *out_path, size_t cap,
+                                  bool *out_is_dir, uint64_t *out_size) {
+    const char *cr = clean_rel_path(rel);
+    if (!cr) {
+        if (out_path && cap) out_path[0] = 0;
+        if (out_size) *out_size = 0;
+        return false;
+    }
+    if (!*cr) {
+        if (!allow_dirs) {
+            if (out_path && cap) out_path[0] = 0;
+            if (out_size) *out_size = 0;
+            return false;
+        }
+        if (out_path && cap) snprintf(out_path, cap, "%s", g_romfs_dir);
+        if (out_is_dir) *out_is_dir = true;
+        if (out_size) *out_size = 0;
+        return plat_is_dir(g_romfs_dir);
+    }
+    ModRomfsItem items[MODS_SCAN_MAX];
+    int nmods = collect_mod_romfs(true, items, MODS_SCAN_MAX);
+    char cand[1200];
+    uint64_t sz = 0;
+    for (int i = nmods; i >= 0; i--) {
+        const char *layer_root = (i > 0) ? items[i - 1].romfs : g_romfs_dir;
+        join_romfs_sub(layer_root, cr, cand, sizeof cand);
+        if (plat_is_dir(cand)) {
+            if (!allow_dirs) continue;
+            if (out_path && cap) snprintf(out_path, cap, "%s", cand);
+            if (out_is_dir) *out_is_dir = true;
+            if (out_size) *out_size = 0;
+            return true;
+        }
+        if (plat_file_info(cand, &sz, NULL)) {
+            if (out_path && cap) snprintf(out_path, cap, "%s", cand);
+            if (out_is_dir) *out_is_dir = false;
+            if (out_size) *out_size = sz;
+            return true;
+        }
+    }
+    if (out_path && cap) snprintf(out_path, cap, "%s", cand);  // last iteration wrote g_romfs_dir/<cr>
+    if (out_size) *out_size = 0;
+    return false;
+}
+
+bool fs_resolve_romfs_file(const char *rel, char *out, size_t cap, uint64_t *out_size) {
+    return resolve_layered_entry(rel, false, out, cap, NULL, out_size);
+}
+
+bool fs_layered_stat(const char *rel, bool *out_is_dir, uint64_t *out_size) {
+    return resolve_layered_entry(rel, true, NULL, 0, out_is_dir, out_size);
+}
+
+int fs_layered_list_dir(const char *rel, FsLayeredEntry **out_entries) {
+    if (out_entries) *out_entries = NULL;
+    const char *cr = clean_rel_path(rel);
+    if (!cr) return -1;
+    ModRomfsItem items[MODS_SCAN_MAX];
+    int nmods = collect_mod_romfs(true, items, MODS_SCAN_MAX);
+    const char *layers[MODS_SCAN_MAX + 1];
+    layers[0] = g_romfs_dir;
+    for (int i = 0; i < nmods; i++) layers[i + 1] = items[i].romfs;
+
+    bool found_dir = false;
+    FsLayeredEntry *arr = NULL;
+    int count = 0, cap = 0;
+    for (int li = 0; li <= nmods; li++) {
+        char dpath[1200];
+        join_romfs_sub(layers[li], cr, dpath, sizeof dpath);
+        PlatDir *d = plat_opendir(dpath);
+        if (!d) continue;
+        found_dir = true;
+        char ename[256];
+        bool is_d = false;
+        uint64_t fsize = 0;
+        while (plat_readdir(d, ename, sizeof ename, &is_d, &fsize)) {
+            if (ename[0] == '.') continue;
+            int idx = -1;
+            for (int k = 0; k < count; k++) {
+                if (!strcmp(arr[k].name, ename)) { idx = k; break; }
+            }
+            if (idx < 0) {
+                if (count == cap) {
+                    cap = cap ? cap * 2 : 32;
+                    arr = realloc(arr, sizeof *arr * cap);
+                }
+                idx = count++;
+                snprintf(arr[idx].name, sizeof arr[idx].name, "%s", ename);
+            }
+            arr[idx].is_dir = is_d;
+            arr[idx].size = is_d ? 0 : fsize;
+        }
+        plat_closedir(d);
+    }
+    if (!found_dir) { free(arr); return -1; }
+    if (count > 1) qsort(arr, count, sizeof *arr, cmp_layered_entry);
+    if (out_entries) *out_entries = arr;
+    else free(arr);
+    return count;
+}
+
 static void base_open(void) {
     if (g_base_open) return;
     char path[1100], why[256] = "";
-    if (romfs_layout(g_romfs_dir, &g_base, why, sizeof why)) {
+    ModRomfsItem items[MODS_SCAN_MAX];
+    int nmods = collect_mod_romfs(true, items, MODS_SCAN_MAX);
+    const char *ov_ptrs[MODS_SCAN_MAX];
+    for (int i = 0; i < nmods; i++) ov_ptrs[i] = items[i].romfs;
+    int replaced = 0, added = 0;
+    if (romfs_layout_with_overlays(g_romfs_dir, ov_ptrs, nmods, &g_base, why, sizeof why, &replaced, &added)) {
         LOG("[fs] romfs: %d files served from %s\n", g_base.nfiles, g_romfs_dir);
+        if (nmods > 0) {
+            char names[512] = "";
+            for (int i = 0; i < nmods; i++) {
+                if (i) strlcat(names, ", ", sizeof names);
+                strlcat(names, items[i].name, sizeof names);
+            }
+            LOG("[fs] mods: %d active (%d replaced, %d added): %s\n", nmods, replaced, added, names);
+        } else if (!fs_mods_enabled()) {
+            int present = collect_mod_romfs(false, items, MODS_SCAN_MAX);
+            if (present > 0) LOG("[fs] mods: disabled (%d present in mods/)\n", present);
+        }
     } else {
         snprintf(path, sizeof path, "%s.bin", g_romfs_dir);  // (an older version's image)
         g_base_fd = plat_open_rdonly(path);

@@ -31,6 +31,7 @@ extern "C" {
 #include "../game_addresses.h"
 #include "../gamebuild.h"
 #include "../gamelib.h"
+#include "../romfs_build.h"
 #include "../settings.h"
 #include "../input_bind.h"
 #include "../gl/gl_backend.h"
@@ -114,6 +115,7 @@ static bool launcher_pad_event(const SDL_Event &e) {
 enum {
     YW1_VER_NONE = 0,
     YW1_VER_JP_130 = 1,
+    YW1_VER_UNIVERSAL = 2,
 };
 
 struct Yw1KnownBuild {
@@ -131,6 +133,7 @@ struct GameCheckResult {
     bool has_images = false;
     bool exefs_ok = false;
     bool build_id_ok = false;
+    bool title_id_ok = false;
     bool romfs_ok = false;
     bool dll_ok = false;
     bool ready = false;
@@ -139,6 +142,7 @@ struct GameCheckResult {
     std::string exefs_dir;
     std::string romfs_dir;
     std::string found_build_id;
+    std::string found_title_id;
     std::string nacp_version;
     std::string supported_langs;
     std::string headline;
@@ -260,37 +264,54 @@ static GameCheckResult validate_game_dir(const std::string &raw_dir) {
         return r;
     }
 
-    static const struct { const char *name; const char *magic; } k_exefs_req[] = {
-        {"main", "NSO0"},
-        {"main.npdm", "META"},
-        {"rtld", "NSO0"},
-        {"sdk", "NSO0"},
-        {"subsdk0", "NSO0"},
+    static const struct { const char *name; const char *magic; bool required; } k_exefs_req[] = {
+        {"main", "NSO0", true},
+        {"main.npdm", "META", true},
+        {"rtld", "NSO0", true},
+        {"sdk", "NSO0", true},
+        {"subsdk0", "NSO0", false},
     };
     std::vector<std::string> missing_exe, bad_exe;
     unsigned char main_hdr[0x60] = {};
     bool have_main_hdr = false;
+    uint64_t tid = 0;
     for (const auto &req : k_exefs_req) {
         std::string fp = r.exefs_dir + "/" + req.name;
         if (!plat_path_exists(fp.c_str())) {
-            missing_exe.emplace_back(req.name);
+            if (req.required) missing_exe.emplace_back(req.name);
         } else if (!check_magic4(fp, req.magic, strcmp(req.name, "main") == 0 ? main_hdr : nullptr)) {
             bad_exe.emplace_back(req.name);
-        } else if (strcmp(req.name, "main") == 0) {
-            have_main_hdr = true;
+        } else {
+            if (strcmp(req.name, "main") == 0) have_main_hdr = true;
+            if (strcmp(req.name, "main.npdm") == 0) tid = game_npdm_title_id(fp.c_str());
         }
     }
+    if (tid != 0) {
+        char tb[20];
+        snprintf(tb, sizeof tb, "%016llX", (unsigned long long)tid);
+        r.found_title_id = tb;
+        r.title_id_ok = (tid == YW1_TITLE_ID);
+    }
+
+    bool has_yw1_fa = plat_path_exists((r.romfs_dir + "/yw1_a.fa").c_str()) ||
+                      plat_path_exists((r.romfs_dir + "/YW1_A.FA").c_str());
 
     if (have_main_hdr) {
         char hex[41];
         for (int i = 0; i < 20; i++) snprintf(hex + i * 2, 3, "%02X", main_hdr[0x40 + i]);
         hex[40] = 0;
         r.found_build_id = hex;
-        for (const auto &kb : k_yw1_builds) {
-            if (strcmp(hex, kb.build_id) == 0) {
-                r.version_kind = kb.kind;
+        if (tid == 0 || tid == YW1_TITLE_ID) {
+            for (const auto &kb : k_yw1_builds) {
+                if (strcmp(hex, kb.build_id) == 0) {
+                    r.version_kind = kb.kind;
+                    r.build_id_ok = true;
+                    break;
+                }
+            }
+            if (!r.build_id_ok && (r.title_id_ok || (tid == 0 && has_yw1_fa))) {
+                r.version_kind = YW1_VER_UNIVERSAL;
                 r.build_id_ok = true;
-                break;
             }
         }
     }
@@ -298,10 +319,8 @@ static GameCheckResult validate_game_dir(const std::string &raw_dir) {
     r.exefs_ok = missing_exe.empty() && bad_exe.empty() && r.build_id_ok;
     r.nacp_version = read_nacp_display_ver(r.resolved_root);
 
-    bool has_yw1_fa = plat_path_exists((r.romfs_dir + "/yw1_a.fa").c_str()) ||
-                      plat_path_exists((r.romfs_dir + "/YW1_A.FA").c_str());
     r.romfs_ok = (r.version_kind != YW1_VER_NONE) && has_yw1_fa;
-    if (r.version_kind == YW1_VER_JP_130) {
+    if (r.version_kind != YW1_VER_NONE) {
         r.supported_langs = "日本語 (Japanese)";
     }
 
@@ -329,7 +348,12 @@ static GameCheckResult validate_game_dir(const std::string &raw_dir) {
     } else if (!r.build_id_ok) {
         r.headline = ui_tr(STR_VAL_BUILDID_HEAD);
         char det[512];
-        snprintf(det, sizeof det, ui_tr(STR_VAL_BUILDID_DET_FMT), r.found_build_id.c_str());
+        if (!r.found_title_id.empty() && !r.title_id_ok) {
+            snprintf(det, sizeof det, "Title ID %s (expected 0100C0000CEEA000) · Build %s",
+                     r.found_title_id.c_str(), r.found_build_id.substr(0, 16).c_str());
+        } else {
+            snprintf(det, sizeof det, ui_tr(STR_VAL_BUILDID_DET_FMT), r.found_build_id.c_str());
+        }
         r.detail = det;
     } else if (!r.romfs_ok) {
         r.headline = ui_tr(STR_VAL_NOROM_HEAD);
@@ -337,7 +361,12 @@ static GameCheckResult validate_game_dir(const std::string &raw_dir) {
     } else {
         r.ready = r.dll_ok;
         r.headline = ui_tr(STR_VAL_OK_HEAD);
-        r.detail = std::string(ui_tr(STR_VAL_DETECTED_PFX)) + "yw1_a.fa · " + r.found_build_id.substr(0, 16);
+        std::string ver_tag = !r.nacp_version.empty()
+                                  ? ((r.nacp_version[0] == 'v' || r.nacp_version[0] == 'V') ? r.nacp_version : ("v" + r.nacp_version))
+                                  : (r.version_kind == YW1_VER_JP_130 ? "JP v1.3.0" : "Universal");
+        std::string tid_tag = !r.found_title_id.empty() ? r.found_title_id : "0100C0000CEEA000";
+        r.detail = std::string(ui_tr(STR_VAL_DETECTED_PFX)) + "yw1_a.fa · " + ver_tag +
+                   " · ID " + tid_tag + " · Build " + r.found_build_id.substr(0, 16);
         if (!r.supported_langs.empty()) {
             r.detail += "\n" + std::string(ui_tr(STR_VAL_SUPPORTED_LANGS_PFX)) + r.supported_langs;
         }
@@ -1188,6 +1217,23 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
                                            "%s", chk.detail.c_str());
                         ImGui::PopTextWrapPos();
                     }
+                    {
+                        int nmods = fs_mods_count();
+                        bool mods_on = fs_mods_enabled();
+                        if (mods_on) {
+                            ImGui::TextColored(nmods > 0 ? cyan : ImVec4(0.70f, 0.78f, 0.84f, 1.0f),
+                                               ui_tr(STR_MODS_BADGE_FMT), nmods);
+                        } else {
+                            ImGui::TextDisabled("%s", ui_tr(STR_MODS_STATUS_DISABLED));
+                        }
+                        ImGui::SameLine(0, 12.0f * sc);
+                        if (ImGui::SmallButton(ui_tr(STR_BTN_OPEN_MODS))) {
+                            char mdir[1100];
+                            fs_mods_dir(mdir, sizeof mdir);
+                            plat_mkdir_p(mdir);
+                            plat_open_folder(mdir);
+                        }
+                    }
 
                     ImGui::Spacing();
                     bool tools_avail = gamebuild_available();
@@ -1394,6 +1440,14 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
                         open_tab(ui_tr(STR_BTN_QUICK_CONTROLS), 8);
                         open_tab(ui_tr(STR_BTN_QUICK_SYSTEM), 9);
                         ImGui::EndTable();
+                    }
+                    ImGui::Spacing();
+                    {
+                        bool mods_on = g_settings.mods_enabled;
+                        if (ImGui::Checkbox(ui_tr(STR_OPT_MODS_ENABLE), &mods_on)) {
+                            g_settings.mods_enabled = mods_on;
+                            settings_save();
+                        }
                     }
                     ImGui::EndChild();  // quickset_card
 

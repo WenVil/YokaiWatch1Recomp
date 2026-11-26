@@ -676,20 +676,20 @@ static void *renderer_tick(void *arg) {
             target = renderer_queue_target(r, N, frame_bytes);
             next = 0;
         }
-        uint64_t mult = rt_speed_mult();
-        if (mult > 1) {
+        uint32_t spd_pct = rt_effective_speed_pct();
+        if (spd_pct > 100) {
             if (r->stream && !was_fast) SDL_ClearAudioStream(r->stream);
             was_fast = true;
             clock_gettime(CLOCK_MONOTONIC, &now);
             uint64_t t = now.tv_sec * 1000000000ull + now.tv_nsec;
             if (!next || next + 100000000ull < t) next = t;
             if (next > t) { struct timespec ts = {0, (long)(next - t)}; nanosleep(&ts, NULL); }
-            next += (uint64_t)N * 1000000000ull / r->sample_rate / mult;
+            next += ((uint64_t)N * 1000000000ull / r->sample_rate) * 100ull / spd_pct;
         } else {
             if (was_fast) { was_fast = false; next = 0; }
             if (r->stream) {
                 while (SDL_GetAudioStreamQueued(r->stream) >= target && !r->quit &&
-                       rt_speed_mult() == 1 && g_settings.audio_channels == r->stream_mode) {
+                       rt_effective_speed_pct() == 100 && g_settings.audio_channels == r->stream_mode) {
                     struct timespec ts = {0, 1000000};
                     nanosleep(&ts, NULL);
                 }
@@ -709,7 +709,7 @@ static void *renderer_tick(void *arg) {
             memset(out, 0, frame_bytes);
         }
         pthread_mutex_unlock(&r->lock);
-        if (r->stream && mult == 1) { apply_gain(r->stream); SDL_PutAudioStreamData(r->stream, out, frame_bytes); }
+        if (r->stream && spd_pct == 100) { apply_gain(r->stream); SDL_PutAudioStreamData(r->stream, out, frame_bytes); }
         if (r->wav && r->state == 0 && och == 2) {
             fwrite(out, 1, frame_bytes, r->wav);
             r->wav_bytes += frame_bytes;
@@ -1238,12 +1238,12 @@ static void *audout_thread(void *arg) {
         pthread_mutex_unlock(&a->lock);
         if (!size) { struct timespec ts = {0, 1000000}; nanosleep(&ts, NULL); continue; }
         uint64_t frames = size / (2 * ch);
-        uint64_t mult = rt_speed_mult();
-        if (mult > 1) {
+        uint32_t spd_pct = rt_effective_speed_pct();
+        if (spd_pct > 100) {
             if (a->stream && !a->was_fast) SDL_ClearAudioStream(a->stream);
             a->was_fast = true;
             // Accelerated: play nothing and hand the buffer back after its scaled duration.
-            uint64_t ns = frames * 1000000000ull / (a->rate ? a->rate : 48000) / mult;
+            uint64_t ns = ((frames * 1000000000ull / (a->rate ? a->rate : 48000)) * 100ull) / spd_pct;
             struct timespec ts = {(time_t)(ns / 1000000000ull), (long)(ns % 1000000000ull)};
             nanosleep(&ts, NULL);
         } else if (a->stream) {
@@ -1251,7 +1251,7 @@ static void *audout_thread(void *arg) {
             apply_gain(a->stream);
             audout_put_data(a, (const void *)(uintptr_t)data, size, ch, &scratch, &scratch_cap);
             while (SDL_GetAudioStreamQueued(a->stream) > target && !a->quit &&
-                   rt_speed_mult() == 1 && g_settings.audio_channels == a->stream_mode) {
+                   rt_effective_speed_pct() == 100 && g_settings.audio_channels == a->stream_mode) {
                 struct timespec ts = {0, 1000000};
                 nanosleep(&ts, NULL);
             }

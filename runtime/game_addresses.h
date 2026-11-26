@@ -24,6 +24,12 @@ typedef struct GameVersion {
     const GameAddrs *addrs;
 } GameVersion;
 
+// Expected Nintendo Switch Program/Title ID for Yo-kai Watch 1 (all JP updates v1.0.0 / v1.3.0 / v1.4.0+).
+#define YW1_TITLE_ID 0x0100C0000CEEA000ULL
+
+// Reads an exefs/main.npdm file and returns its ACI0 Program/Title ID (little-endian), or 0 if invalid.
+uint64_t game_npdm_title_id(const char *npdm_path);
+
 // The version whose main build ID is the first 20 bytes of id (exefs/main 0x40), or NULL.
 const GameVersion *game_version_by_build_id(const uint8_t id[20]);
 // The version of a main program file (exefs/main), or NULL (missing, unreadable or unknown).

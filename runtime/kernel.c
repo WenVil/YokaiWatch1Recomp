@@ -82,65 +82,98 @@ void kernel_signal(KObject *o) {
 // The game paces itself against its own clocks: it sleeps fixed guest-nanosecond amounts and times its frames with the
 // 19.2 MHz system tick. Acceleration scales every guest-visible clock and every guest wait by the same factor, using
 // monotonic segmented accumulation in rt_ticks() so runtime 1x<->2x<->3x toggles never jump or go backward.
-static uint64_t g_speed_mult = 1;
-static int g_env_speed = -1;  // -1: unread, 0: unlocked by env, >=1: locked to LARECOMP_SPEED_MULT
+static uint32_t g_speed_pct = 100;
+static int g_env_speed_pct = -1;  // -1: unread, 0: unlocked by env, >=100: locked by LARECOMP_SPEED_MULT or YW1_SPEED
 static pthread_mutex_t g_ticks_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t g_ticks_last_ns, g_ticks_accum_ns;
+static uint32_t g_ticks_last_eff_pct = 100;
 
-static int read_env_speed(void) {
-    int es = __atomic_load_n(&g_env_speed, __ATOMIC_ACQUIRE);
+extern bool movie_is_playing(void);
+
+static int parse_speed_pct_str(const char *s) {
+    if (!s || !*s) return 0;
+    double v = atof(s);
+    if (v <= 0.0) return 100;
+    int pct = (int)(v * 100.0 + 0.5);
+    if (pct < 100) pct = 100;
+    if (pct > 6400) pct = 6400;
+    return pct;
+}
+
+static int read_env_speed_pct(void) {
+    int es = __atomic_load_n(&g_env_speed_pct, __ATOMIC_ACQUIRE);
     if (es < 0) {
-        const char *e = getenv("LARECOMP_SPEED_MULT");
-        int v = e && *e ? atoi(e) : 0;
-        if (e && *e) {
-            if (v < 1) v = 1;
-            if (v > 64) v = 64;
+        const char *e1 = getenv("YW1_SPEED");
+        const char *e2 = getenv("LARECOMP_SPEED_MULT");
+        int v = 0;
+        if (e1 && *e1) {
+            v = parse_speed_pct_str(e1);
+        } else if (e2 && *e2) {
+            v = parse_speed_pct_str(e2);
         }
         es = v;
-        __atomic_store_n(&g_env_speed, es, __ATOMIC_RELEASE);
+        __atomic_store_n(&g_env_speed_pct, es, __ATOMIC_RELEASE);
     }
     return es;
 }
 
-bool rt_speed_locked_by_env(void) { return read_env_speed() > 0; }
+bool rt_speed_locked_by_env(void) { return read_env_speed_pct() > 0; }
 
-uint64_t rt_speed_mult(void) {
-    int es = read_env_speed();
-    if (es > 0) return (uint64_t)es;
-    uint64_t v = __atomic_load_n(&g_speed_mult, __ATOMIC_RELAXED);
-    return v ? v : 1;
+uint32_t rt_speed_pct(void) {
+    int es = read_env_speed_pct();
+    if (es > 0) return (uint32_t)es;
+    uint32_t v = __atomic_load_n(&g_speed_pct, __ATOMIC_RELAXED);
+    return v >= 100 ? v : 100u;
 }
 
-static uint64_t ticks_scale_milli(void) {
-    static double scale = -1;
-    if (scale < 0) scale = getenv("LARECOMP_TICK_SCALE") ? atof(getenv("LARECOMP_TICK_SCALE")) : 0.0;
-    return scale > 0 ? (uint64_t)(scale * 1000.0) : rt_speed_mult() * 1000;
+uint32_t rt_effective_speed_pct(void) {
+    if (movie_is_playing()) return 100u;
+    return rt_speed_pct();
+}
+
+uint64_t rt_speed_mult(void) {
+    uint32_t pct = rt_effective_speed_pct();
+    return (uint64_t)((pct + 50u) / 100u);
 }
 
 static uint64_t ticks_advance_locked(void) {
     uint64_t now = plat_now_ns();
-    if (!g_ticks_last_ns) g_ticks_last_ns = now;
+    if (!g_ticks_last_ns) {
+        g_ticks_last_ns = now;
+        g_ticks_last_eff_pct = rt_effective_speed_pct();
+    }
     uint64_t dt = now > g_ticks_last_ns ? now - g_ticks_last_ns : 0;
     g_ticks_last_ns = now;
-    uint64_t m = ticks_scale_milli();
+    uint32_t eff = rt_effective_speed_pct();
+    static double env_scale = -1;
+    if (env_scale < 0) env_scale = getenv("LARECOMP_TICK_SCALE") ? atof(getenv("LARECOMP_TICK_SCALE")) : 0.0;
+    uint64_t m = env_scale > 0 ? (uint64_t)(env_scale * 1000.0) : (uint64_t)g_ticks_last_eff_pct * 10ull;
+    g_ticks_last_eff_pct = eff;
     g_ticks_accum_ns += (uint64_t)((__uint128_t)dt * m / 1000);
     return g_ticks_accum_ns;
 }
 
-void rt_set_speed_mult(uint64_t m) {
-    if (read_env_speed() > 0) return;
-    if (m < 1) m = 1;
-    if (m > 64) m = 64;
+void rt_set_speed_pct(uint32_t pct) {
+    if (read_env_speed_pct() > 0) return;
+    if (pct < 100) pct = 100;
+    if (pct > 6400) pct = 6400;
     pthread_mutex_lock(&g_ticks_mu);
     ticks_advance_locked();
-    __atomic_store_n(&g_speed_mult, m, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_speed_pct, pct, __ATOMIC_RELEASE);
+    g_ticks_last_eff_pct = rt_effective_speed_pct();
     pthread_mutex_unlock(&g_ticks_mu);
+}
+
+void rt_set_speed_mult(uint64_t m) {
+    if (m < 1) m = 1;
+    if (m > 64) m = 64;
+    rt_set_speed_pct((uint32_t)(m * 100ull));
 }
 
 // A guest duration in host nanoseconds (a sleep or wait timeout): the guest's time runs faster, so it lasts less.
 static uint64_t guest_ns(uint64_t ns) {
-    uint64_t m = rt_speed_mult();
-    return m > 1 ? ns / m : ns;
+    uint32_t pct = rt_effective_speed_pct();
+    return pct > 100 ? (uint64_t)((__uint128_t)ns * 100ull / pct) : ns;
 }
 
 uint64_t rt_ticks(void) {

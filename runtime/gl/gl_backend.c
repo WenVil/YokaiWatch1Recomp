@@ -11,8 +11,10 @@
 #include <windows.h>
 #endif
 
+#include "../cpu.h"
 #include "../game_addresses.h"
 #include "../paths.h"
+#include "../platform.h"
 #include "../rt.h"
 #include "../settings.h"
 
@@ -108,6 +110,7 @@ static bool frame_should_dump(uint64_t frame) {
 static void dump_frame_bmp(uint64_t frame) {
     if (!s_window) return;
     int pw = 1920, ph = 1080;
+    gl_hle_get_virtual_fbo_size(&pw, &ph);
 
     int row_stride = (pw * 3 + 3) & ~3;
     size_t img_bytes = (size_t)row_stride * (size_t)ph;
@@ -167,6 +170,7 @@ void gl_backend_window_init(void) {
     if (s_window) return;
     atexit(gl_quick_exit_handler);
     settings_load();
+    rt_set_speed_pct((uint32_t)(g_settings.speed_pct >= 100 ? g_settings.speed_pct : 100));
     input_apply_background();
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) FATAL("SDL_Init: %s\n", SDL_GetError());
     input_load_user_mappings();
@@ -341,6 +345,8 @@ void gl_backend_set_swap_interval(int interval) {
 }
 
 void gl_backend_swap_buffers(void) {
+    static bool s_speed_vsync_overridden;
+    static uint64_t s_last_swap_ns;
     if (!s_window || atomic_load_explicit(&s_quitting, memory_order_acquire)) return;
     if (rt_reboot_requested()) {
         gl_imgui_overlay_shutdown();
@@ -355,7 +361,28 @@ void gl_backend_swap_buffers(void) {
     int win_w = 1280, win_h = 720, pw = 1280, ph = 720;
     float density = 1.0f;
     gl_backend_get_cached_metrics(&win_w, &win_h, &pw, &ph, &density);
-    gl_backend_apply_pending_vsync();
+    uint32_t eff_pct = rt_effective_speed_pct();
+    if (eff_pct > 100) {
+        if (!s_speed_vsync_overridden || s_swap_interval != 0) {
+            SDL_GL_SetSwapInterval(0);
+            s_swap_interval = 0;
+            s_speed_vsync_overridden = true;
+        }
+        uint64_t target_frame_ns = (33333333ull * 100ull) / eff_pct;
+        uint64_t now_ns = plat_now_ns();
+        if (s_last_swap_ns > 0 && now_ns - s_last_swap_ns < target_frame_ns) {
+            plat_sleep_until_ns(s_last_swap_ns + target_frame_ns);
+            now_ns = plat_now_ns();
+        }
+        s_last_swap_ns = now_ns;
+    } else {
+        s_last_swap_ns = 0;
+        if (s_speed_vsync_overridden) {
+            s_speed_vsync_overridden = false;
+            atomic_store_explicit(&s_pending_swap_interval, vsync_interval_from_settings(), memory_order_release);
+        }
+        gl_backend_apply_pending_vsync();
+    }
     gl_hle_blit_virtual_fbo(pw, ph);
     gl_imgui_render_in_game_overlay(frame, win_w, win_h, pw, ph, density);
     SDL_GL_SwapWindow(s_window);

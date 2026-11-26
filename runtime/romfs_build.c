@@ -35,11 +35,76 @@ struct Dir {
     Dir **dirs;
     File **files;
     int ndirs, nfiles;
+    int cap_dirs, cap_files;
     uint32_t off;  // entry offset in the directory table
 };
 
 static int by_name_dir(const void *a, const void *b) { return strcmp((*(Dir *const *)a)->name, (*(Dir *const *)b)->name); }
 static int by_name_file(const void *a, const void *b) { return strcmp((*(File *const *)a)->name, (*(File *const *)b)->name); }
+
+static void dir_push_dir(Dir *parent, Dir *child) {
+    if (parent->ndirs == parent->cap_dirs) {
+        parent->cap_dirs = parent->cap_dirs ? parent->cap_dirs * 2 : 8;
+        parent->dirs = realloc(parent->dirs, sizeof *parent->dirs * parent->cap_dirs);
+    }
+    parent->dirs[parent->ndirs++] = child;
+}
+
+static void dir_push_file(Dir *parent, File *file) {
+    if (parent->nfiles == parent->cap_files) {
+        parent->cap_files = parent->cap_files ? parent->cap_files * 2 : 16;
+        parent->files = realloc(parent->files, sizeof *parent->files * parent->cap_files);
+    }
+    parent->files[parent->nfiles++] = file;
+}
+
+static void sort_tree(Dir *dir) {
+    if (dir->ndirs > 1) qsort(dir->dirs, dir->ndirs, sizeof *dir->dirs, by_name_dir);
+    if (dir->nfiles > 1) qsort(dir->files, dir->nfiles, sizeof *dir->files, by_name_file);
+    for (int i = 0; i < dir->ndirs; i++) sort_tree(dir->dirs[i]);
+}
+
+static void merge_dir(Dir *dst, const Dir *src, int *replaced, int *added) {
+    for (int i = 0; i < src->nfiles; i++) {
+        const File *sf = src->files[i];
+        File *match = NULL;
+        for (int j = 0; j < dst->nfiles; j++) {
+            if (!strcmp(dst->files[j]->name, sf->name)) { match = dst->files[j]; break; }
+        }
+        if (match) {
+            char *np = strdup(sf->path);
+            if (np) {
+                free(match->path);
+                match->path = np;
+                match->size = sf->size;
+                if (replaced) (*replaced)++;
+            }
+        } else {
+            File *nf = calloc(1, sizeof *nf);
+            nf->name = strdup(sf->name);
+            nf->path = strdup(sf->path);
+            nf->size = sf->size;
+            nf->parent = dst;
+            dir_push_file(dst, nf);
+            if (added) (*added)++;
+        }
+    }
+    for (int i = 0; i < src->ndirs; i++) {
+        const Dir *sd = src->dirs[i];
+        Dir *bd = NULL;
+        for (int j = 0; j < dst->ndirs; j++) {
+            if (!strcmp(dst->dirs[j]->name, sd->name)) { bd = dst->dirs[j]; break; }
+        }
+        if (!bd) {
+            bd = calloc(1, sizeof *bd);
+            bd->name = strdup(sd->name);
+            bd->path = strdup(sd->path);
+            bd->parent = dst;
+            dir_push_dir(dst, bd);
+        }
+        merge_dir(bd, sd, replaced, added);
+    }
+}
 
 static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
     if (depth > 32) return NULL;
@@ -47,7 +112,6 @@ static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
     if (!d) return NULL;
     Dir *dir = calloc(1, sizeof *dir);
     dir->name = strdup(name), dir->path = strdup(path), dir->parent = parent;
-    int cd = 0, cf = 0;
     char ename[512];
     bool is_d = false;
     uint64_t fsize = 0;
@@ -60,13 +124,11 @@ static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
             Dir *c = scan(p, ename, dir, depth + 1);
             free(p);
             if (!c) continue;
-            if (dir->ndirs == cd) dir->dirs = realloc(dir->dirs, sizeof *dir->dirs * (cd = cd ? cd * 2 : 8));
-            dir->dirs[dir->ndirs++] = c;
+            dir_push_dir(dir, c);
         } else {
             File *f = calloc(1, sizeof *f);
             f->name = strdup(ename), f->path = p, f->size = fsize, f->parent = dir;
-            if (dir->nfiles == cf) dir->files = realloc(dir->files, sizeof *dir->files * (cf = cf ? cf * 2 : 16));
-            dir->files[dir->nfiles++] = f;
+            dir_push_file(dir, f);
         }
     }
     plat_closedir(d);
@@ -127,15 +189,27 @@ uint64_t romfs_dir_bytes(const char *dir) {
     return n;
 }
 
-bool romfs_layout(const char *dir, RomfsLayout *out, char *why, size_t why_size) {
+bool romfs_layout_with_overlays(const char *dir, const char *const *overlay_dirs, int n_overlays,
+                                RomfsLayout *out, char *why, size_t why_size,
+                                int *out_replaced, int *out_added) {
     #define FAIL(...) do { if (why) snprintf(why, why_size, __VA_ARGS__); goto fail; } while (0)
     bool ok = false;
     uint8_t *dtab = NULL, *ftab = NULL;
     uint32_t *dbuckets = NULL, *fbuckets = NULL;
     Lists l = {0};
     memset(out, 0, sizeof *out);
+    if (out_replaced) *out_replaced = 0;
+    if (out_added) *out_added = 0;
     Dir *root = scan(dir, "", NULL, 0);
     if (!root) FAIL("can't read %s", dir);
+    for (int oi = 0; oi < n_overlays; oi++) {
+        if (!overlay_dirs || !overlay_dirs[oi] || !overlay_dirs[oi][0]) continue;
+        Dir *ov = scan(overlay_dirs[oi], "", NULL, 0);
+        if (!ov) continue;
+        merge_dir(root, ov, out_replaced, out_added);
+        free_tree(ov);
+    }
+    if (n_overlays > 0) sort_tree(root);
     // table order: root, then each directory's subdirectories as flatten() lists them; files likewise
     if (l.nd == l.cd) l.dirs = realloc(l.dirs, sizeof *l.dirs * (l.cd = 64));
     l.dirs[l.nd++] = root;
@@ -218,6 +292,10 @@ fail:
     free_tree(root);
     return ok;
     #undef FAIL
+}
+
+bool romfs_layout(const char *dir, RomfsLayout *out, char *why, size_t why_size) {
+    return romfs_layout_with_overlays(dir, NULL, 0, out, why, why_size, NULL, NULL);
 }
 
 void romfs_layout_free(RomfsLayout *l) {
