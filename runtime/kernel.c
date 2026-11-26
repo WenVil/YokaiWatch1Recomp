@@ -751,31 +751,6 @@ static void probe_check(Cpu *c, uint32_t imm) {
             }
         }
     }
-    // LARECOMP_PROBE_POOL (13 Sentinels): the pool the game's "operator new" carves from (manager at
-    // main+0x10e23a8, pool at manager+0x3a8: cursor +0x20, end +0x30, capacity u32 +0x10). A leak shows as a cursor
-    // that only grows; the crash (f_70002f9c80 with a NULL object) is this pool refusing a 0x200-byte request.
-    static int probe_pool = -1;
-    if (probe_pool < 0) {
-        const GameVersion *gv = game_version();
-        probe_pool = (gv && !strncmp(gv->key, "v13_", 4)) && ENV("LARECOMP_PROBE_POOL") != NULL;
-    }
-    if (probe_pool) {
-        static uint64_t n;
-        if ((__atomic_fetch_add(&n, 1, __ATOMIC_RELAXED) & 0x3ff) == 0) {
-            uint64_t pool = *(volatile uint64_t *)(uintptr_t)(MAIN_BASE + 0x10e39d0ull);
-            uint64_t mgr = *(volatile uint64_t *)(uintptr_t)(MAIN_BASE + 0x10e23a8ull);
-            uint8_t flag = mgr ? *(volatile uint8_t *)(uintptr_t)(mgr + 0x77f8ull) : 0xff;
-            LOG("[mgr] %#llx flag+0x77f8=%u pool=%#llx\n", (unsigned long long)mgr, flag, (unsigned long long)pool);
-            if (pool) {
-                    uint32_t cap = *(volatile uint32_t *)(uintptr_t)(pool + 0x10ull);
-                    uint64_t cur = *(volatile uint64_t *)(uintptr_t)(pool + 0x20ull);
-                    uint64_t end = *(volatile uint64_t *)(uintptr_t)(pool + 0x30ull);
-                    LOG("[pool] %#llx cursor=%#llx end=%#llx cap=%#x used=%lld\n", (unsigned long long)pool,
-                        (unsigned long long)cur, (unsigned long long)end, cap,
-                        (long long)(end && cur ? (long long)(cur - (end - cap)) : -1));
-            }
-        }
-    }
     for (int i = 0; i < probe_n; i++) {
         uint64_t v = *(volatile uint64_t *)(uintptr_t)probe_addrs[i];
         if (v == probe_last[i]) continue;

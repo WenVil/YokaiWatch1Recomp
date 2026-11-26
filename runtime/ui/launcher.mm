@@ -1,10 +1,6 @@
-// Compliant Multi-Language HiDPI Launcher & Pre-Launch Settings UI for 13 Sentinels: Aegis Rim (M3-A2).
-// Validates user-supplied extracted exefs/romfs (including Windows UTF-8 CJK paths) without copying CPKs,
+// Compliant Multi-Language HiDPI Launcher & Pre-Launch Settings UI for Yo-kai Watch 1 Recompiled.
+// Validates user-supplied extracted exefs/romfs (including Windows UTF-8 CJK paths) without copying game files,
 // supports full controller navigation, live UI/game language switching, save backups, and smooth animated loading.
-#ifdef __APPLE__
-#import <Metal/Metal.h>
-#import <QuartzCore/CAMetalLayer.h>
-#endif
 #include <SDL3/SDL.h>
 #include <ctype.h>
 #include <float.h>
@@ -26,11 +22,7 @@
 #include "pad_nav.h"
 #include "ui_font.h"
 #include "ui_i18n.h"
-#ifdef __APPLE__
-#include "imgui_impl_metal.h"
-#else
-#include "imgui_impl_vulkan.h"
-#endif
+#include "imgui_impl_opengl3.h"
 #include "imgui_impl_sdl3.h"
 
 extern "C" {
@@ -41,50 +33,16 @@ extern "C" {
 #include "../gamelib.h"
 #include "../settings.h"
 #include "../input_bind.h"
+#include "../gl/gl_backend.h"
+#include "../gl/gl_imgui.h"
 bool controls_ui_took_back(void);
-void ui_window_init(void);
-void ui_window_set_title(const char *title);
-SDL_Window *ui_window(void);
 void boot_prepare(const char *root, int *stage);
-#ifdef __APPLE__
-void *ui_metal_layer(void);
-void *ui_metal_device(void);
-#else
-bool vk_frame_begin(const float clear[4]);
-void vk_frame_end(const char *shot_path);
-void *vk_frame_cmd(void);
-bool vk_imgui_backend_init(void);
-void vk_imgui_fonts_rebuild(void);
-void vk_imgui_backend_shutdown(void);
-#endif
 }
-
-#ifdef __APPLE__
-#import <ImageIO/ImageIO.h>
-#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
-static void save_png(id<MTLTexture> tex, const char *path) {
-    size_t w = tex.width, h = tex.height;
-    std::vector<uint8_t> px(w * h * 4);
-    [tex getBytes:px.data() bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef ctx = CGBitmapContextCreate(px.data(), w, h, 8, w * 4, cs,
-                                             kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
-    CGImageRef img = CGBitmapContextCreateImage(ctx);
-    CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, strlen(path), false);
-    CGImageDestinationRef dest = CGImageDestinationCreateWithURL(url, (__bridge CFStringRef)UTTypePNG.identifier, 1, NULL);
-    if (dest) {
-        CGImageDestinationAddImage(dest, img, NULL);
-        CGImageDestinationFinalize(dest);
-        CFRelease(dest);
-    }
-    CFRelease(url), CGImageRelease(img), CGContextRelease(ctx), CGColorSpaceRelease(cs);
-}
-#endif
 
 #define LARECOMP_VERSION "v1.0.0-beta1"
 extern "C" const char *larecomp_version(void) { return LARECOMP_VERSION; }
 
-extern "C" int g_start_screen;
+extern "C" int g_start_screen = 0;
 extern int g_tab_request_ext;
 extern "C" void menu_apply_window_requests(void *sdl_window);
 extern "C" void input_cursor_event(const SDL_Event *e);
@@ -152,27 +110,23 @@ static bool launcher_pad_event(const SDL_Event &e) {
     }
 }
 
-// ------------------------------------------------------------------ 13 Sentinels resource validation
+// ------------------------------------------------------------------ Yo-kai Watch 1 resource validation
 enum {
-    V13_VER_NONE = 0,
-    V13_VER_ASIA_100 = 1,
-    V13_VER_US_100 = 2,
-    V13_VER_US_110 = 3,
+    YW1_VER_NONE = 0,
+    YW1_VER_JP_130 = 1,
 };
 
-struct V13KnownBuild {
+struct Yw1KnownBuild {
     int kind;
     const char *build_id;
     const char *region_tag;
 };
 
-static const V13KnownBuild k_v13_builds[] = {
-    {V13_VER_ASIA_100, "311947020F64F5742CE3C16162C4D87F92C68313", "Asia"},
-    {V13_VER_US_100,   "57212E16CB83BB553B7C08493B9484FB836E56C8", "US/EU"},
-    {V13_VER_US_110,   "4B632573CA5C160EABB70519FB622718956D70EA", "US/EU"},
+static const Yw1KnownBuild k_yw1_builds[] = {
+    {YW1_VER_JP_130, "B6E172353E696E656A538CEBD5722661C89B368F", "JP v1.3.0"},
 };
 
-struct V13CheckResult {
+struct GameCheckResult {
     bool configured = false;
     bool has_images = false;
     bool exefs_ok = false;
@@ -180,10 +134,7 @@ struct V13CheckResult {
     bool romfs_ok = false;
     bool dll_ok = false;
     bool ready = false;
-    int version_kind = V13_VER_NONE;
-    bool has_tw_cpk = false;
-    bool has_ko_cpk = false;
-    bool has_patch_us = false;
+    int version_kind = YW1_VER_NONE;
     std::string resolved_root;
     std::string exefs_dir;
     std::string romfs_dir;
@@ -222,7 +173,7 @@ static bool scan_has_images(const std::string &dir, int depth) {
     return false;
 }
 
-static bool resolve_v13_pair(const std::string &base, std::string &out_root, std::string &out_exefs, std::string &out_romfs) {
+static bool resolve_yw1_pair(const std::string &base, std::string &out_root, std::string &out_exefs, std::string &out_romfs) {
     char ex[1200], rm[1200];
     if (rt_find_subdir_icase(base.c_str(), "exefs", ex, sizeof ex) &&
         rt_find_subdir_icase(base.c_str(), "romfs", rm, sizeof rm)) {
@@ -278,16 +229,12 @@ static std::string read_nacp_display_ver(const std::string &root) {
 }
 
 static bool is_game_lang_mismatch(int version_kind, int game_lang) {
-    if (game_lang == GAME_LANG_AUTO || version_kind == V13_VER_NONE) return false;
-    if (version_kind == V13_VER_ASIA_100) {
-        return game_lang != GAME_LANG_ZH_HANS && game_lang != GAME_LANG_ZH_HANT && game_lang != GAME_LANG_KO;
-    }
-    return game_lang != GAME_LANG_EN_US && game_lang != GAME_LANG_FR && game_lang != GAME_LANG_DE &&
-           game_lang != GAME_LANG_IT && game_lang != GAME_LANG_ES;
+    if (game_lang == GAME_LANG_AUTO || version_kind == YW1_VER_NONE) return false;
+    return game_lang != GAME_LANG_JA;
 }
 
-static V13CheckResult validate_game_dir(const std::string &raw_dir) {
-    V13CheckResult r;
+static GameCheckResult validate_game_dir(const std::string &raw_dir) {
+    GameCheckResult r;
     if (raw_dir.empty()) {
         r.headline = ui_tr(STR_VAL_EMPTY_HEAD);
         r.detail = ui_tr(STR_VAL_EMPTY_DET);
@@ -301,7 +248,7 @@ static V13CheckResult validate_game_dir(const std::string &raw_dir) {
     }
     r.has_images = scan_has_images(raw_dir, 0);
 
-    if (!resolve_v13_pair(raw_dir, r.resolved_root, r.exefs_dir, r.romfs_dir)) {
+    if (!resolve_yw1_pair(raw_dir, r.resolved_root, r.exefs_dir, r.romfs_dir)) {
         r.resolved_root = raw_dir;
         if (r.has_images) {
             r.headline = ui_tr(STR_VAL_IMG_HEAD);
@@ -339,7 +286,7 @@ static V13CheckResult validate_game_dir(const std::string &raw_dir) {
         for (int i = 0; i < 20; i++) snprintf(hex + i * 2, 3, "%02X", main_hdr[0x40 + i]);
         hex[40] = 0;
         r.found_build_id = hex;
-        for (const auto &kb : k_v13_builds) {
+        for (const auto &kb : k_yw1_builds) {
             if (strcmp(hex, kb.build_id) == 0) {
                 r.version_kind = kb.kind;
                 r.build_id_ok = true;
@@ -351,35 +298,11 @@ static V13CheckResult validate_game_dir(const std::string &raw_dir) {
     r.exefs_ok = missing_exe.empty() && bad_exe.empty() && r.build_id_ok;
     r.nacp_version = read_nacp_display_ver(r.resolved_root);
 
-    auto find_cpk = [&](const char *upper_name, const char *lower_name) -> bool {
-        return plat_path_exists((r.romfs_dir + "/" + upper_name).c_str()) ||
-               plat_path_exists((r.romfs_dir + "/" + lower_name).c_str());
-    };
-
-    bool has_cn = false, has_us = false;
-    bool has_fr = false, has_ge = false, has_it = false, has_sp = false;
-    bool missing_us_core = false, missing_us_patch = false;
-    if (r.version_kind == V13_VER_ASIA_100) {
-        has_cn = find_cpk("ROBO_CN.CPK", "robo_cn.cpk");
-        r.has_tw_cpk = find_cpk("ROBO_TW.CPK", "robo_tw.cpk");
-        r.has_ko_cpk = find_cpk("ROBO_KO.CPK", "robo_ko.cpk");
-        r.romfs_ok = has_cn;
-        r.supported_langs = "简体中文 · 繁體中文 · 한국어";
-    } else if (r.version_kind == V13_VER_US_100 || r.version_kind == V13_VER_US_110) {
-        has_us = find_cpk("ROBO_US.CPK", "robo_us.cpk");
-        has_fr = find_cpk("ROBO_FR.CPK", "robo_fr.cpk");
-        has_ge = find_cpk("ROBO_GE.CPK", "robo_ge.cpk");
-        has_it = find_cpk("ROBO_IT.CPK", "robo_it.cpk");
-        has_sp = find_cpk("ROBO_SP.CPK", "robo_sp.cpk");
-        r.has_patch_us = find_cpk("ROBO_PATCH_US.CPK", "robo_patch_us.cpk");
-        missing_us_core = !has_us;
-        missing_us_patch = (r.version_kind == V13_VER_US_110 && !r.has_patch_us);
-        r.romfs_ok = !missing_us_core && !missing_us_patch;
-        r.supported_langs = "English";
-        if (has_fr) r.supported_langs += " · Français";
-        if (has_ge) r.supported_langs += " · Deutsch";
-        if (has_it) r.supported_langs += " · Italiano";
-        if (has_sp) r.supported_langs += " · Español";
+    bool has_yw1_fa = plat_path_exists((r.romfs_dir + "/yw1_a.fa").c_str()) ||
+                      plat_path_exists((r.romfs_dir + "/YW1_A.FA").c_str());
+    r.romfs_ok = (r.version_kind != YW1_VER_NONE) && has_yw1_fa;
+    if (r.version_kind == YW1_VER_JP_130) {
+        r.supported_langs = "日本語 (Japanese)";
     }
 
     r.dll_ok = gamelib_present(r.resolved_root.c_str());
@@ -409,38 +332,12 @@ static V13CheckResult validate_game_dir(const std::string &raw_dir) {
         snprintf(det, sizeof det, ui_tr(STR_VAL_BUILDID_DET_FMT), r.found_build_id.c_str());
         r.detail = det;
     } else if (!r.romfs_ok) {
-        if (missing_us_patch) {
-            r.headline = ui_tr(STR_VAL_NOPATCH_US_HEAD);
-            r.detail = ui_tr(STR_VAL_NOPATCH_US_DET);
-        } else if (missing_us_core || r.version_kind != V13_VER_ASIA_100) {
-            r.headline = ui_tr(STR_VAL_NOROM_US_HEAD);
-            r.detail = ui_tr(STR_VAL_NOROM_US_DET);
-        } else {
-            r.headline = ui_tr(STR_VAL_NOROM_HEAD);
-            r.detail = ui_tr(STR_VAL_NOROM_DET);
-        }
+        r.headline = ui_tr(STR_VAL_NOROM_HEAD);
+        r.detail = ui_tr(STR_VAL_NOROM_DET);
     } else {
         r.ready = r.dll_ok;
-        if (r.version_kind == V13_VER_ASIA_100) {
-            r.headline = ui_tr(STR_VAL_OK_HEAD);
-            r.detail = std::string(ui_tr(STR_VAL_DETECTED_PFX)) + "ROBO_CN.CPK";
-            if (r.has_tw_cpk) r.detail += " · ROBO_TW.CPK";
-            if (r.has_ko_cpk) r.detail += " · ROBO_KO.CPK";
-        } else if (r.version_kind == V13_VER_US_100) {
-            r.headline = ui_tr(STR_VAL_OK_US100_HEAD);
-            r.detail = std::string(ui_tr(STR_VAL_DETECTED_PFX)) + "ROBO_US.CPK";
-            if (has_fr) r.detail += " · FR";
-            if (has_ge) r.detail += " · GE";
-            if (has_it) r.detail += " · IT";
-            if (has_sp) r.detail += " · SP";
-        } else {
-            r.headline = ui_tr(STR_VAL_OK_US110_HEAD);
-            r.detail = std::string(ui_tr(STR_VAL_DETECTED_PFX)) + "ROBO_US.CPK · ROBO_PATCH_US.CPK";
-            if (has_fr) r.detail += " · FR";
-            if (has_ge) r.detail += " · GE";
-            if (has_it) r.detail += " · IT";
-            if (has_sp) r.detail += " · SP";
-        }
+        r.headline = ui_tr(STR_VAL_OK_HEAD);
+        r.detail = std::string(ui_tr(STR_VAL_DETECTED_PFX)) + "yw1_a.fa · " + r.found_build_id.substr(0, 16);
         if (!r.supported_langs.empty()) {
             r.detail += "\n" + std::string(ui_tr(STR_VAL_SUPPORTED_LANGS_PFX)) + r.supported_langs;
         }
@@ -719,8 +616,9 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
     g_start_screen = 1;
     g_play_requested = false;
 
-    ui_window_init();
-    SDL_Window *win = ui_window();
+    gl_backend_window_init();
+    SDL_Window *win = gl_backend_window();
+    void *gl_ctx = gl_backend_context();
 
     IMGUI_CHECKVERSION();
     ImGuiContext *prev_ctx = ImGui::GetCurrentContext();
@@ -739,18 +637,9 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
     ui_load_i18n_fonts(&f_small, &f_menu, &f_title,
                         28.0f * raster_scale, 33.0f * raster_scale, 38.0f * raster_scale,
                         built_lang, nullptr, getenv("LARECOMP_LAUNCHER_FONT"));
-    ui_apply_sentinel_theme(sc);
+    ui_apply_yw1_theme(sc);
 
-#ifdef __APPLE__
-    CAMetalLayer *layer = (__bridge CAMetalLayer *)ui_metal_layer();
-    id<MTLDevice> dev = (__bridge id<MTLDevice>)ui_metal_device();
-    id<MTLCommandQueue> queue = [dev newCommandQueue];
-    ImGui_ImplSDL3_InitForMetal(win);
-    ImGui_ImplMetal_Init(dev);
-#else
-    ImGui_ImplSDL3_InitForVulkan(win);
-    vk_imgui_backend_init();
-#endif
+    gl_imgui_launcher_init(win, gl_ctx);
     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, NULL, 0);
     launcher_pad_open_all();
     if (SDL_HasGamepad()) io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
@@ -770,13 +659,13 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
         if (last_win_title_lang != rl) {
             last_win_title_lang = rl;
             char wt[256];
-            snprintf(wt, sizeof wt, "13SentinelsRecomp — %s", ui_tr_lang(rl, STR_APP_TITLE));
-            ui_window_set_title(wt);
+            snprintf(wt, sizeof wt, "YokaiWatch1Recomp — %s", ui_tr_lang(rl, STR_APP_TITLE));
+            gl_backend_window_set_title(wt);
         }
     };
     sync_win_title(built_lang);
 
-    V13CheckResult chk = validate_game_dir(active_dir);
+    GameCheckResult chk = validate_game_dir(active_dir);
     int chk_lang = built_lang;
     std::string backup_msg;
     bool backup_err = false;
@@ -792,6 +681,14 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
             view = VIEW_LOADING;
         }
     }
+
+    const char *smoke_env = getenv("YW1_UI_SMOKE_TEST");
+    bool smoke_on = smoke_env && *smoke_env && strcmp(smoke_env, "0") != 0;
+    int smoke_frame = 0;
+    int smoke_rebuilds = 0;
+    int smoke_max_missing = 0;
+    int smoke_saved_ui_lang = g_settings.ui_lang;
+    bool smoke_exit_ok = true;
 
     long shot_at = getenv("LARECOMP_LAUNCHER_SHOT") ? atol(getenv("LARECOMP_LAUNCHER_SHOT")) : 0, frame = 0;
     bool open_lang_popup = getenv("LARECOMP_OPEN_LANG_POPUP") != NULL;
@@ -958,18 +855,55 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
 
         menu_apply_window_requests(win);
 
+        if (smoke_on) {
+            if (smoke_frame == 0) {
+                g_settings.ui_lang = UI_LANG_ZH_HANS;
+                view = VIEW_HOME;
+                built_lang = -1;
+            } else if (smoke_frame == 2) {
+                g_settings.ui_lang = UI_LANG_ZH_HANT;
+                view = VIEW_SETTINGS;
+                menu_tabs_focus(true);
+                g_tab_request_ext = 0;
+            } else if (smoke_frame == 4) {
+                g_settings.ui_lang = UI_LANG_JA;
+                g_tab_request_ext = 1;
+            } else if (smoke_frame == 6) {
+                g_settings.ui_lang = UI_LANG_KO;
+                g_tab_request_ext = 8;
+            } else if (smoke_frame == 8) {
+                g_settings.ui_lang = UI_LANG_EN;
+                g_tab_request_ext = 9;
+            } else if (smoke_frame >= 10) {
+                g_settings.ui_lang = smoke_saved_ui_lang;
+                smoke_exit_ok = (smoke_max_missing == 0 && smoke_rebuilds >= 2 && gl_imgui_gl_error_count() == 0);
+                fprintf(stderr, "[ui-smoke] DONE langs_checked=5 missing_max=%d font_rebuilds=%d glErrors=%llu status=%s\n",
+                        smoke_max_missing, smoke_rebuilds, (unsigned long long)gl_imgui_gl_error_count(),
+                        smoke_exit_ok ? "PASS" : "FAIL");
+                break;
+            }
+            smoke_frame++;
+        }
+
+        if (gl_imgui_consume_window_apply()) gl_backend_apply_window_settings();
+
         // HiDPI & live UI language font rebuild cleanly BEFORE starting GPU frame
         compute_hidpi_metrics(win, &sc, &pix_density, &raster_scale);
         int cur_ui_lang = ui_resolve_lang();
         bool path_missing = (extra_font_paths != built_dir && !extra_font_paths.empty() && f_small &&
                              ui_font_text_missing(f_small, extra_font_paths.c_str()));
         if (cur_ui_lang != built_lang || fabsf(raster_scale - built_raster) > 0.04f || path_missing) {
-#ifndef __APPLE__
             ui_load_i18n_fonts(&f_small, &f_menu, &f_title,
                                 28.0f * raster_scale, 33.0f * raster_scale, 38.0f * raster_scale,
                                 cur_ui_lang, extra_font_paths.c_str(), getenv("LARECOMP_LAUNCHER_FONT"));
-            vk_imgui_fonts_rebuild();
-#endif
+            if (!gl_imgui_fonts_rebuild()) smoke_exit_ok = false;
+            int miss = ui_font_last_missing_count();
+            if (miss > smoke_max_missing || miss < 0) smoke_max_missing = (miss < 0 ? 999 : miss);
+            if (built_lang >= 0) smoke_rebuilds++;
+            if (smoke_on) {
+                fprintf(stderr, "[ui-smoke] rebuilt fonts lang=%s missing=%d rebuilds=%d glErr=%llu\n",
+                        ui_i18n_lang_name(cur_ui_lang), miss, smoke_rebuilds, (unsigned long long)gl_imgui_gl_error_count());
+            }
             built_lang = cur_ui_lang;
             built_raster = raster_scale;
             built_dir = extra_font_paths;
@@ -980,7 +914,7 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
             chk_lang = cur_ui_lang;
         }
         if (fabsf(style_built_sc - sc) > 0.01f) {
-            ui_apply_sentinel_theme(sc);
+            ui_apply_yw1_theme(sc);
             style_built_sc = sc;
         }
 
@@ -988,46 +922,18 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
         while (SDL_PollEvent(&e)) {
             input_cursor_event(&e);
             if (view == VIEW_SETTINGS && bind_capture_event(&e)) continue;
-            if (!launcher_pad_event(e)) ImGui_ImplSDL3_ProcessEvent(&e);
+            if (!launcher_pad_event(e)) gl_imgui_launcher_process_event(&e);
             if (e.type == SDL_EVENT_QUIT) {
                 if (boot_started) pthread_join(boot_tid, NULL);
                 exit(0);
             }
         }
 
-#ifdef __APPLE__
-        int w, h;
-        SDL_GetWindowSizeInPixels(win, &w, &h);
-        layer.drawableSize = CGSizeMake(w, h);
-        @autoreleasepool {
-            id<CAMetalDrawable> drawable = [layer nextDrawable];
-            if (!drawable) { SDL_Delay(16); continue; }
-            MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-            rp.colorAttachments[0].texture = drawable.texture;
-            rp.colorAttachments[0].loadAction = MTLLoadActionClear;
-            rp.colorAttachments[0].clearColor = MTLClearColorMake(0.04, 0.06, 0.09, 1);
-            rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-            id<MTLCommandBuffer> cb = [queue commandBuffer];
-            id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
-            ImGui_ImplMetal_NewFrame(rp);
-#else
         {
-            static uint64_t next_frame;
-            const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(win));
-            uint64_t period = (uint64_t)(1e9 / (dm && dm->refresh_rate > 1 ? dm->refresh_rate : 60.0f));
-            uint64_t now = plat_now_ns();
-            bool on_time = next_frame > now && next_frame - now <= period;
-            if (on_time) plat_sleep_until_ns(next_frame);
-            next_frame = (on_time ? next_frame : now) + period;
-            static const float clear_col[4] = {0.035f, 0.055f, 0.088f, 1.0f};
-            if (!vk_frame_begin(clear_col)) { SDL_Delay(16); continue; }
-            ImGui_ImplVulkan_NewFrame();
-#endif
             if (input_cursor_hidden()) io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
             else io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
-            ImGui_ImplSDL3_NewFrame();
+            gl_imgui_launcher_begin_frame();
             if (SDL_HasGamepad()) io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
-            ImGui::NewFrame();
 
             // Fonts are already rasterized at physical pixels (sc * pix_density); only invert pix_density for logical points
             io.FontGlobalScale = 1.0f / pix_density;
@@ -1038,7 +944,7 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
                 int stg = __atomic_load_n(&boot_args.stage, __ATOMIC_ACQUIRE);
                 ui_draw_loading_visual(el, stg, nullptr, sc, f_title, f_menu);
             } else {
-                // Deep Sentinel background gradient
+                // Yo-kai Watch 1 deep twilight background gradient
                 ImDrawList *bg = ImGui::GetBackgroundDrawList();
                 bg->AddRectFilledMultiColor(ImVec2(0, 0), ds,
                                             IM_COL32(8, 14, 24, 255), IM_COL32(14, 26, 40, 255),
@@ -1071,7 +977,7 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
                     ImGui::PushFont(f_title);
                     ImGui::TextColored(gold, "%s", ui_tr(STR_APP_TITLE));
                     ImGui::PopFont();
-                    ImGui::TextDisabled("13SentinelsRecomp %s  ·  %s", LARECOMP_VERSION, ui_tr(STR_APP_SUBTITLE));
+                    ImGui::TextDisabled("YokaiWatch1Recomp %s  ·  %s", LARECOMP_VERSION, ui_tr(STR_APP_SUBTITLE));
                     sync_win_title(cur_ui_lang);
 
                     ImGui::TableNextColumn();
@@ -1280,11 +1186,6 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
                         ImGui::PushTextWrapPos(0);
                         ImGui::TextColored(files_ok ? ImVec4(0.84f, 0.90f, 0.94f, 1.0f) : ImVec4(0.96f, 0.78f, 0.74f, 1.0f),
                                            "%s", chk.detail.c_str());
-                        ImGui::PopTextWrapPos();
-                    }
-                    if (files_ok && chk.version_kind == V13_VER_US_100) {
-                        ImGui::PushTextWrapPos(0);
-                        ImGui::TextColored(ImVec4(0.95f, 0.79f, 0.36f, 1.0f), "%s", ui_tr(STR_VAL_US100_UPD_HINT));
                         ImGui::PopTextWrapPos();
                     }
 
@@ -1675,51 +1576,27 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
                 osk_draw(f_menu, sc);
             }
 
-            ImGui::Render();
-#ifdef __APPLE__
-            ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cb, enc);
-            [enc endEncoding];
-            id<MTLTexture> shot = nil;
-            if (shot_at && ++frame == shot_at) {
-                MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:drawable.texture.pixelFormat
-                                             width:drawable.texture.width height:drawable.texture.height mipmapped:NO];
-                td.storageMode = MTLStorageModeShared;
-                shot = [dev newTextureWithDescriptor:td];
-                id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
-                [bl copyFromTexture:drawable.texture toTexture:shot];
-                [bl endEncoding];
-            }
-            [cb presentDrawable:drawable];
-            [cb commit];
-            if (shot) {
-                [cb waitUntilCompleted];
-                save_png(shot, getenv("LARECOMP_SHOT_PATH") ? getenv("LARECOMP_SHOT_PATH") : "build/launcher.png");
-                exit(0);
-            }
-#else
-            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), (VkCommandBuffer)vk_frame_cmd());
-            bool shot = shot_at && ++frame == shot_at;
-            vk_frame_end(shot ? (getenv("LARECOMP_SHOT_PATH") ? getenv("LARECOMP_SHOT_PATH") : "build/launcher.png") : NULL);
-            if (shot) exit(0);
-#endif
+            int pw = 0, ph = 0;
+            SDL_GetWindowSizeInPixels(win, &pw, &ph);
+            if (pw <= 0) pw = 1280;
+            if (ph <= 0) ph = 720;
+            gl_imgui_launcher_end_frame(pw, ph);
+            if (shot_at && ++frame == shot_at) exit(0);
         }
     }
 
-#ifdef __APPLE__
-    ImGui_ImplMetal_Shutdown();
-#else
-    vk_imgui_backend_shutdown();
-#endif
-    ImGui_ImplSDL3_Shutdown();
+    gl_imgui_launcher_shutdown();
     ImGui::DestroyContext(ctx);
     ImGui::SetCurrentContext(prev_ctx);
     g_start_screen = 0;
+    if (smoke_on) exit(smoke_exit_ok ? 0 : 1);
 }
 
 // Stage-A animated loading splash for `skip_launcher` interactive startups
 extern "C" void launcher_loading_boot(const char *root) {
-    ui_window_init();
-    SDL_Window *win = ui_window();
+    gl_backend_window_init();
+    SDL_Window *win = gl_backend_window();
+    void *gl_ctx = gl_backend_context();
 
     IMGUI_CHECKVERSION();
     ImGuiContext *prev_ctx = ImGui::GetCurrentContext();
@@ -1734,18 +1611,9 @@ extern "C" void launcher_loading_boot(const char *root) {
     ui_load_i18n_fonts(&f_small, &f_menu, &f_title,
                         28.0f * raster_scale, 33.0f * raster_scale, 44.0f * raster_scale,
                         ui_resolve_lang(), nullptr, getenv("LARECOMP_LAUNCHER_FONT"));
-    ui_apply_sentinel_theme(sc);
+    ui_apply_yw1_theme(sc);
 
-#ifdef __APPLE__
-    CAMetalLayer *layer = (__bridge CAMetalLayer *)ui_metal_layer();
-    id<MTLDevice> dev = (__bridge id<MTLDevice>)ui_metal_device();
-    id<MTLCommandQueue> queue = [dev newCommandQueue];
-    ImGui_ImplSDL3_InitForMetal(win);
-    ImGui_ImplMetal_Init(dev);
-#else
-    ImGui_ImplSDL3_InitForVulkan(win);
-    vk_imgui_backend_init();
-#endif
+    gl_imgui_launcher_init(win, gl_ctx);
 
     BootWorkerArgs boot_args;
     boot_args.root = root ? root : "extracted";
@@ -1767,32 +1635,21 @@ extern "C" void launcher_loading_boot(const char *root) {
                 exit(0);
             }
         }
-#ifdef __APPLE__
-        break;
-#else
-        static const float clear_col[4] = {0.035f, 0.055f, 0.088f, 1.0f};
-        if (!vk_frame_begin(clear_col)) { SDL_Delay(16); continue; }
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
+        gl_imgui_launcher_begin_frame();
         io.FontGlobalScale = 1.0f / pix_density;
         double el = (SDL_GetTicks() / 1000.0) - boot_t0;
         int stg = __atomic_load_n(&boot_args.stage, __ATOMIC_ACQUIRE);
         ui_draw_loading_visual(el, stg, nullptr, sc, f_title, f_menu);
-        ImGui::Render();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), (VkCommandBuffer)vk_frame_cmd());
-        vk_frame_end(NULL);
+        int pw = 0, ph = 0;
+        SDL_GetWindowSizeInPixels(win, &pw, &ph);
+        if (pw <= 0) pw = 1280;
+        if (ph <= 0) ph = 720;
+        gl_imgui_launcher_end_frame(pw, ph);
         SDL_Delay(16);
-#endif
     }
     if (boot_started) pthread_join(boot_tid, NULL);
 
-#ifdef __APPLE__
-    ImGui_ImplMetal_Shutdown();
-#else
-    vk_imgui_backend_shutdown();
-#endif
-    ImGui_ImplSDL3_Shutdown();
+    gl_imgui_launcher_shutdown();
     ImGui::DestroyContext(ctx);
     ImGui::SetCurrentContext(prev_ctx);
 }

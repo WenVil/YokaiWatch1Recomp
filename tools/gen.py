@@ -550,26 +550,9 @@ class Module:
         all_labels = any(v == 'all' for v in tables.values())
         if all_labels:
             labels = set(range(entry, end, 4))
-        rando_here = [] if generic_mode else [a for a in range(entry, end, 4) if a - self.base in RANDO_CODE]
-        if rando_here:
-            labels = set(labels)
-            for a in rando_here:
-                for w in RANDO_CODE[a - self.base]:
-                    v = self.lifter.lift(w, a)
-                    if v.kind in ('b', 'bcond') and isinstance(v.target, int) and entry <= v.target < end:
-                        labels.add(v.target)
-        hooks_here = [a for a in range(entry, end, 4) if a in HOOKS]
-        if hooks_here:  # (a hook's jump targets need their labels)
-            labels = set(labels)
-            for a in hooks_here:
-                for t in HOOKS[a][1]:
-                    if not entry <= t < end:
-                        raise ValueError(f'hook {a:#x}: target {t:#x} is outside its function')
-                    labels.add(t)
         # Sub-chunk gigantic generic functions (> 4000 insns) into 2000-insn static parts chained via
         # __attribute__((musttail)) so neither -O1 compile time nor -O0 RegAllocFast stack frames explode.
-        if ((end - entry) // 4 > 4000 and generic_mode and not all_labels
-                and not aliases and not ft_unwind and not rando_here and not hooks_here):
+        if (end - entry) // 4 > 4000 and generic_mode and not all_labels and not aliases and not ft_unwind:
             return self._emit_split_function(entry, end, tables, refs)
 
         last = None
@@ -578,34 +561,6 @@ class Module:
             if a in labels:
                 flush()
                 out.append(f'L_{a:x}:;')
-            if a - self.base in RANDO_CODE:  # randomizer patch site: the active seed picks the instruction
-                flush()
-                out.append(f'    {{ extern uint32_t rando_word(uint64_t); uint32_t rw = rando_word({hx(a)});')
-                first = True
-                for w in RANDO_CODE[a - self.base]:
-                    v = self.lifter.lift(w, a)
-                    out.append(f'    {"if" if first else "else if"} (rw == {hx(w)}) {{ ' + ' '.join(self.render_single(v, a, jump, refs)) + ' }')
-                    first = False
-                out.append('    else { ' + ' '.join(self.render_single(ins, a, jump, refs)) + ' } }')
-                last = 'op'
-                continue
-            if a in HOOKS:  # hook site (tools/patches.py HOOKS): the runtime decides, the instruction stays as it is
-                flush()
-                word, targets, _ = HOOKS[a]
-                w = struct.unpack_from('<I', self.nso.image, a - self.base)[0]
-                if w != word:
-                    raise ValueError(f'hook {a:#x}: instruction {w:#010x}, expected {word:#010x}')
-                body = ' '.join(self.render_single(ins, a, jump, refs))
-                jumps = ' '.join(f'else if (h_ == {k + 2}) goto L_{t:x};' for k, t in enumerate(targets))
-                out.append(f'    {{ int h_ = rt_hook(c, {hx(a)}); if (h_ == 0) {{ {body} }} {jumps} }}'
-                           f'  /* {a:#x}: hook (runtime/hle/hooks.c) */')
-                last = 'op'
-                continue
-            if a in PATCHES:  # hand-written replacement for one instruction (tools/patches.py)
-                flush()
-                out.append('    ' + PATCHES[a](self, a))
-                last = 'op'
-                continue
             k = ins.kind
             if k == 'asm':
                 if len(batch) >= 24:
@@ -771,11 +726,6 @@ class Module:
                 if a in need_labels[pi]:
                     flush()
                     p_out.append(f'L_{a:x}:;')
-                if a in PATCHES:
-                    flush()
-                    p_out.append('    ' + PATCHES[a](self, a))
-                    last = 'op'
-                    continue
                 k = ins.kind
                 if k == 'asm':
                     if len(batch) >= 24:
@@ -863,19 +813,6 @@ class Module:
         return out
 
 
-# tools/patches.py, for the main module only (its sites are main addresses): loaded in main() once the game version
-# is known from the NSO's build ID (tools/game_addresses.py; an unknown build ID stops the generator)
-HOOKS, PATCHES = {}, {}
-
-import json as _json
-import os as _os
-_rv = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'rando', 'patch_variants.json')
-RANDO_CODE = {}
-if _os.path.exists(_rv):
-    for _a, _ws in _json.load(open(_rv))['code'].items():
-        RANDO_CODE[int(_a, 16)] = [int(_w, 16) for _w in _ws]
-
-
 def write_if_changed(path, text):
     """Leaves unchanged chunks untouched so make only recompiles what a patch affected."""
     try:
@@ -899,7 +836,7 @@ def main():
     ap.add_argument('--chunk-bytes', type=int, default=1500000)  # and about this much C (even compile times)
     ap.add_argument('--big-fn', type=int, default=100000)  # bytes of C from which a function gets its own file
     ap.add_argument('--limit', type=int, default=0)
-    ap.add_argument('--generic', action='store_true', help='Route A generic codegen (auto-enabled for v13_*, vyw1_*)')
+    ap.add_argument('--generic', action='store_true', help='Route A generic codegen (default for vyw1_*)')
     ap.add_argument('--simd', choices=('asm', 'c'),
                     default='asm' if platform.machine().lower() in ('arm64', 'aarch64') else 'c')
     args = ap.parse_args()
@@ -907,8 +844,7 @@ def main():
     t0 = time.time()
     m = Module(args.name, args.nso, args.base, args.simd)
     version = None
-    generic_mode = args.generic or (args.name != 'main')
-    global HOOKS, PATCHES, RANDO_CODE
+    generic_mode = True
     if args.name == 'main':
         import game_addresses
         try:
@@ -916,19 +852,9 @@ def main():
         except game_addresses.UnknownGameVersion as e:
             if not args.generic:
                 sys.exit(f'{args.name}: {e}')
-        if version and version.startswith(('v13_', 'vyw1_')):
-            generic_mode = True
-        if generic_mode:
-            HOOKS, PATCHES, RANDO_CODE = {}, {}, {}
-            lbl = game_addresses.VERSIONS[version][0] if version else 'generic'
-            print(f'{args.name}: generic Route A generation for {lbl} (build {m.nso.build_id[:16]})', file=sys.stderr)
-        else:
-            import patches
-            HOOKS, PATCHES = patches.HOOKS, patches.PATCHES
-            label, build_id = game_addresses.VERSIONS[version]
-            print(f'{args.name}: game version {label} (build {build_id[:16]}), address table {version}', file=sys.stderr)
-    elif generic_mode:
-        HOOKS, PATCHES, RANDO_CODE = {}, {}, {}
+        lbl = game_addresses.VERSIONS[version][0] if version else 'generic'
+        print(f'{args.name}: generic Route A generation for {lbl} (build {m.nso.build_id[:16]})', file=sys.stderr)
+    else:
         print(f'{args.name}: generic Route A generation (build {m.nso.build_id[:16]})', file=sys.stderr)
 
     ft_unwinds = m.detect_freetype_setjmp() if (args.name == 'main' and generic_mode) else {}

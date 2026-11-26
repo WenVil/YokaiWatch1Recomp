@@ -18,7 +18,7 @@ struct Entry {
 
 static const Entry k_table[STR_COUNT] = {
     // STR_APP_TITLE
-    {"《十三机兵防卫圈》PC 重编译版", "《十三機兵防衛圈》PC 重編譯版", "13 Sentinels: Aegis Rim PC Recomp", "『十三機兵防衛圏』PC リコンパイル版", "『13기병방위권』 PC 리컴파일판"},
+    {"《妖怪手表 1》PC 重编译版", "《妖怪手錶 1》PC 重編譯版", "Yo-kai Watch 1 Recompiled", "『妖怪ウォッチ1』PC リコンパイル版", "『요괴워치 1』 PC 리컴파일판"},
     // STR_APP_SUBTITLE
     {"合规自备资源启动前端", "合規自備資源啟動前端", "User-Supplied Assets Launcher", "ユーザー所有アセット用ランチャー", "사용자 보유 에셋 전용 런처"},
     // STR_NAV_HOME
@@ -38,9 +38,9 @@ static const Entry k_table[STR_COUNT] = {
     // STR_GAME_LANG_LABEL
     {"游戏语言", "遊戲語言", "Game Language", "ゲーム言語", "게임 언어"},
     // STR_GAME_LANG_DESC_LAUNCHER
-    {"选择游戏文本语言（Switch 系统语言服务）。亚版支持简体中文/繁體中文/韩文；欧美版支持 English/Français/Deutsch/Italiano/Español。设为“自动”时按版本自动适配。", "選擇遊戲文本語言（Switch 系統語言服務）。亞版支援簡體中文/繁體中文/韓文；歐美版支援 English/Français/Deutsch/Italiano/Español。設為「自動」時依版本自動適配。", "Selects the in-game text language (Asia: zh-Hans/zh-Hant/ko; US/EU: en-US/fr/de/it/es). Auto picks a matching default for the loaded version.", "ゲームへ通知する言語を設定します（アジア版: 簡体字/繁体字/韓国語、欧米版: EFIGS）。自動はバージョンに合わせて自動選択します。", "게임에 전달할 언어를 선택합니다(아시아판: 간체/번체/한국어, 북미/유럽판: EFIGS). 자동은 버전에 맞게 선택됩니다."},
+    {"选择传给游戏的 Switch 系统语言服务设置（目前支持日版 1.3.0，默认日语）。设为“自动”时按版本自动适配。", "選擇傳給遊戲的 Switch 系統語言服務設定（目前支援日版 1.3.0，預設日語）。設為「自動」時依版本自動適配。", "Selects the Switch system language service reported to the game (currently supports JP v1.3.0; Auto picks Japanese).", "ゲームへ通知する Switch システム言語を設定します（現在 JP 1.3.0 対応、自動は日本語を選択）。", "게임에 전달할 Switch 시스템 언어를 선택합니다(현재 일본판 1.3.0 지원, 자동은 일본어 선택)."},
     // STR_GAME_LANG_DESC_INGAME
-    {"修改 Switch 系统语言设置并保存至 13sentinels.ini。\n\n提示：游戏语言将在重启游戏后生效。", "修改 Switch 系統語言設定並儲存至 13sentinels.ini。\n\n提示：遊戲語言將在重啟遊戲後生效。", "Saves the Switch system language to 13sentinels.ini.\n\nNote: Restart the game for language changes to take effect.", "Switch システム言語設定を 13sentinels.ini に保存します。\n\n※ ゲーム再起動後に反映されます。", "Switch 시스템 언어 설정을 13sentinels.ini에 저장합니다.\n\n※ 게임 재시작 후 적용됩니다."},
+    {"修改 Switch 系统语言设置并保存至 yokaiwatch1.ini。\n\n提示：游戏语言将在重启游戏后生效。", "修改 Switch 系統語言設定並儲存至 yokaiwatch1.ini。\n\n提示：遊戲語言將在重啟遊戲後生效。", "Saves the Switch system language to yokaiwatch1.ini.\n\nNote: Restart the game for language changes to take effect.", "Switch システム言語設定を yokaiwatch1.ini に保存します。\n\n※ ゲーム再起動後に反映されます。", "Switch 시스템 언어 설정을 yokaiwatch1.ini에 저장합니다.\n\n※ 게임 재시작 후 적용됩니다."},
     // STR_GAME_LANG_RESTART_VAL
     {"重启后生效", "重啟後生效", "Restart req.", "要再起動", "재시작 필요"},
     // STR_GAME_LANG_SAVED_HINT
@@ -59,7 +59,7 @@ static const Entry k_table[STR_COUNT] = {
     {"无法打开系统目录选择窗口，请检查桌面对话框服务或手动配置路径。", "無法開啟系統目錄選擇視窗，請檢查桌面對話框服務或手動配置路徑。", "Could not open folder picker dialog; please check desktop dialog services.", "フォルダ選択ダイアログを開けませんでした。", "폴더 선택 창을 열 수 없습니다."},
 
     // Validation messages
-    {"尚未选择《十三机兵防卫圈》游戏资源目录", "尚未選擇《十三機兵防衛圈》遊戲資源目錄", "Game resource folder is not selected", "ゲームデータフォルダが未選択です", "게임 리소스 폴더가 선택되지 않았습니다"},
+    {"尚未选择《妖怪手表 1》游戏资源目录", "尚未選擇《妖怪手錶 1》遊戲資源目錄", "Game resource folder is not selected", "ゲームデータフォルダが未選択です", "게임 리소스 폴더가 선택되지 않았습니다"},
     {"请点击上方“选择游戏目录...”按钮，选择包含 exefs 与 romfs 文件夹的本地目录。", "請點擊上方「選擇遊戲目錄...」按鈕，選擇包含 exefs 與 romfs 資料夾的本地目錄。", "Click \"Browse Folder...\" and pick the extracted folder containing exefs/ and romfs/.", "「フォルダ選択...」から exefs と romfs を含むフォルダを選択してください。", "「폴더 선택...」을 눌러 exefs 및 romfs 폴더가 포함된 디렉터리를 선택하세요."},
     {"游戏目录不存在或无法访问", "遊戲目錄不存在或無法存取", "Game folder does not exist or is inaccessible", "ゲームフォルダが存在しないかアクセスできません", "게임 폴더가 없거나 접근할 수 없습니다"},
     {"配置路径：", "配置路徑：", "Configured path: ", "設定パス: ", "설정된 경로: "},
@@ -72,21 +72,14 @@ static const Entry k_table[STR_COUNT] = {
     {"文件头损坏或不可读：", "檔案頭損壞或不可讀：", "Invalid header: ", "不正/読込不可: ", "헤더 손상/읽기 불가: "},
     {"、", "、", ", ", "・", ", "},
     {"游戏版本不受支持（Build ID 不匹配）", "遊戲版本不受支援（Build ID 不匹配）", "Unsupported game version (Build ID mismatch)", "未対応バージョン（Build ID 不一致）", "지원되지 않는 버전(Build ID 불일치)"},
-    {"检测到 exefs/main Build ID：%s\n当前支持：《十三机兵防卫圈》亚洲版 1.00 (31194702...)、欧美版 1.00 (57212E16...)、欧美版 1.10 (4B632573...)。", "檢測到 exefs/main Build ID：%s\n當前支援：《十三機兵防衛圈》亞洲版 1.00 (31194702...)、歐美版 1.00 (57212E16...)、歐美版 1.10 (4B632573...)。", "Found exefs/main Build ID: %s\nSupported: 13 Sentinels Asia 1.00 (31194702...), US/EU 1.00 (57212E16...), US/EU 1.10 (4B632573...).", "検出 Build ID: %s\n対応バージョン: アジア版 1.00 (31194702...)、欧米版 1.00 (57212E16...)、欧米版 1.10 (4B632573...)。", "감지된 Build ID: %s\n지원 버전: 아시아판 1.00 (31194702...), 북미/유럽판 1.00 (57212E16...), 북미/유럽판 1.10 (4B632573...)."},
-    {"romfs 缺少核心资源包：romfs/ROBO_CN.CPK", "romfs 缺少核心資源包：romfs/ROBO_CN.CPK", "Missing core asset archive: romfs/ROBO_CN.CPK", "romfs/ROBO_CN.CPK が見つかりません", "핵심 리소스 파일 누락: romfs/ROBO_CN.CPK"},
-    {"请确认已完整解包游戏 romfs 数据（未检测到 romfs/ROBO_CN.CPK）。", "請確認已完整解包遊戲 romfs 資料（未檢測到 romfs/ROBO_CN.CPK）。", "Ensure the full romfs contents are extracted (romfs/ROBO_CN.CPK was not found).", "romfs が完全に展開されているか確認してください（ROBO_CN.CPK 未検出）。", "romfs 데이터가 완전히 추출되었는지 확인하세요(ROBO_CN.CPK 미감지)."},
-    {"romfs 缺少欧美版核心资源包：romfs/ROBO_US.CPK", "romfs 缺少歐美版核心資源包：romfs/ROBO_US.CPK", "Missing US/EU core archive: romfs/ROBO_US.CPK", "欧米版コアアーカイブ romfs/ROBO_US.CPK が見つかりません", "북미/유럽판 핵심 파일 누락: romfs/ROBO_US.CPK"},
-    {"请确认已完整解包欧美版 romfs 数据（未检测到 romfs/ROBO_US.CPK）。", "請確認已完整解包歐美版 romfs 資料（未檢測到 romfs/ROBO_US.CPK）。", "Ensure US/EU romfs contents are extracted (romfs/ROBO_US.CPK was not found).", "欧米版 romfs が完全に展開されているか確認してください（ROBO_US.CPK 未検出）。", "북미/유럽판 romfs가 완전히 추출되었는지 확인하세요(ROBO_US.CPK 미감지)."},
-    {"欧美版 1.10 更新包不完整：缺少 ROBO_PATCH_US.CPK", "歐美版 1.10 更新包不完整：缺少 ROBO_PATCH_US.CPK", "Incomplete US/EU 1.10 update: missing ROBO_PATCH_US.CPK", "欧米版 1.10 更新データ不完全: ROBO_PATCH_US.CPK 不足", "북미/유럽판 1.10 업데이트 불완전: ROBO_PATCH_US.CPK 누락"},
-    {"检测到 exefs 为 1.10 更新版，但 romfs 中未找到 ROBO_PATCH_US.CPK。请使用基础本体 + 1.10 更新包重新合并解包。", "檢測到 exefs 為 1.10 更新版，但 romfs 中未找到 ROBO_PATCH_US.CPK。請使用基礎本體 + 1.10 更新包重新合併解包。", "exefs is v1.10, but romfs/ROBO_PATCH_US.CPK is missing. Re-extract Base + Update 1.10 together.", "exefs は 1.10 ですが romfs/ROBO_PATCH_US.CPK がありません。本体と 1.10 更新を同時に展開してください。", "exefs는 1.10이지만 romfs/ROBO_PATCH_US.CPK가 없습니다. 원본+업데이트를 함께 추출하세요."},
-    {"游戏资源校验通过：亚洲版 1.00", "遊戲資源校驗通過：亞洲版 1.00", "Validation Passed: Asia 1.00", "検証完了: アジア版 1.00", "리소스 검증 완료: 아시아판 1.00"},
-    {"游戏资源校验通过：欧美版 1.00（基础版）", "遊戲資源校驗通過：歐美版 1.00（基礎版）", "Validation Passed: US/EU 1.00 (Base)", "検証完了: 欧米版 1.00（ベース版）", "리소스 검증 완료: 북미/유럽판 1.00 (기본)"},
-    {"游戏资源校验通过：欧美版 1.10（已合并更新）", "遊戲資源校驗通過：歐美版 1.10（已合併更新）", "Validation Passed: US/EU 1.10 (Updated)", "検証完了: 欧米版 1.10（アップデート適用済）", "리소스 검증 완료: 북미/유럽판 1.10 (업데이트됨)"},
-    {"提示：当前为 1.00 基础版，可通过“导入 / 应用更新 (.nsp/.xci)...”合并 1.10 更新补丁。", "提示：當前為 1.00 基礎版，可透過「匯入 / 套用更新 (.nsp/.xci)...」合併 1.10 更新補丁。", "Tip: v1.00 Base detected. Use \"Import / Update (.nsp/.xci)...\" to merge the v1.10 update patch.", "ヒント: 1.00 ベース版です。「インポート / 更新 (.nsp/.xci)...」から 1.10 を適用できます。", "팁: 1.00 기본판입니다. \"가져오기 / 업데이트 (.nsp/.xci)...\"로 1.10 패치를 적용할 수 있습니다."},
+    {"检测到 exefs/main Build ID：%s\n当前支持：《妖怪手表 1》Nintendo Switch 日版 v1.3.0 (B6E172353E696E65...)。", "檢測到 exefs/main Build ID：%s\n當前支援：《妖怪手錶 1》Nintendo Switch 日版 v1.3.0 (B6E172353E696E65...)。", "Found exefs/main Build ID: %s\nSupported: Yo-kai Watch 1 Nintendo Switch JP v1.3.0 (B6E172353E696E65...).", "検出 Build ID: %s\n対応バージョン: 妖怪ウォッチ1 Nintendo Switch 日本版 v1.3.0 (B6E172353E696E65...)。", "감지된 Build ID: %s\n지원 버전: 요괴워치 1 Nintendo Switch 일본판 v1.3.0 (B6E172353E696E65...)."},
+    {"romfs 缺少核心资源包：romfs/yw1_a.fa", "romfs 缺少核心資源包：romfs/yw1_a.fa", "Missing core asset archive: romfs/yw1_a.fa", "romfs/yw1_a.fa が見つかりません", "핵심 리소스 파일 누락: romfs/yw1_a.fa"},
+    {"请确认已完整解包游戏 romfs 数据（未检测到 romfs/yw1_a.fa）。", "請確認已完整解包遊戲 romfs 資料（未檢測到 romfs/yw1_a.fa）。", "Ensure the full romfs contents are extracted (romfs/yw1_a.fa was not found).", "romfs が完全に展開されているか確認してください（yw1_a.fa 未検出）。", "romfs 데이터가 완전히 추출되었는지 확인하세요(yw1_a.fa 미감지)."},
+    {"游戏资源校验通过：日版 v1.3.0", "遊戲資源校驗通過：日版 v1.3.0", "Validation Passed: JP v1.3.0", "検証完了: 日本版 v1.3.0", "리소스 검증 완료: 일본판 v1.3.0"},
     {"内置游戏语言：", "內建遊戲語言：", "Supported Languages: ", "対応言語: ", "지원 언어: "},
     {"提示：当前选择的“游戏语言”不受该版本支持，进入游戏后将由游戏回退到默认语言。", "提示：當前選擇的「遊戲語言」不受該版本支援，進入遊戲後將由遊戲回退到預設語言。", "Note: Selected Game Language is not in this version; the game will fall back to its region default.", "注意: 選択中のゲーム言語はこのバージョンに含まれないため、既定言語にフォールバックします。", "참고: 선택한 게임 언어는 현재 버전에서 지원되지 않아 기본 언어로 대체됩니다."},
     {"已检测到 ", "已檢測到 ", "Detected: ", "検出済み: ", "감지됨: "},
-    {"✓ 游戏代码模块 (lasgame_*.dll)：已就绪，版本匹配", "✓ 遊戲程式碼模組 (lasgame_*.dll)：已就緒，版本匹配", "✓ Game module (lasgame_*.dll): Ready (version matched)", "✓ ゲームモジュール (lasgame_*.dll): 準備完了", "✓ 게임 코드 모듈 (lasgame_*.dll): 준비됨"},
+    {"✓ 游戏代码模块 (yw1game_*.dll)：已就绪，版本匹配", "✓ 遊戲程式碼模組 (yw1game_*.dll)：已就绪，版本匹配", "✓ Game module (yw1game_*.dll): Ready (version matched)", "✓ ゲームモジュール (yw1game_*.dll): 準備完了", "✓ 게임 코드 모듈 (yw1game_*.dll): 준비됨"},
     {"× 游戏代码模块：尚未在本地构建或版本不匹配", "× 遊戲程式碼模組：尚未在本地構建或版本不匹配", "× Game module: Not yet built (or version mismatch)", "× ゲームモジュール: 未構築または不一致", "× 게임 코드 모듈: 미빌드 또는 버전 불일치"},
     {"点击下方「本地构建游戏模块」或直接点击「开始游戏」，将使用自备资源在本机自动生成代码模块（完全合规，不联网下载版权资源）。", "點擊下方「本地構建遊戲模組」或直接點擊「開始遊戲」，將使用自備資源在本機自動生成程式碼模組。", "Click \"Build Game Module\" below or \"Start Game\" directly to compile locally from your own game files.", "「ゲームモジュールを構築」または「ゲーム開始」から、お持ちのデータを使ってローカルで自動構築します。", "아래 '게임 모듈 로컬 빌드' 또는 '게임 시작'을 누르면 보유한 파일로부터 로컬에서 자동 빌드됩니다."},
     {"本地构建游戏模块", "本地構建遊戲模組", "Build Game Module", "ゲームモジュールを構築", "게임 모듈 로컬 빌드"},
@@ -121,10 +114,10 @@ static const Entry k_table[STR_COUNT] = {
 
     // Save card
     {"存档快捷管理", "存檔快捷管理", "Save Management", "セーブデータ管理", "세이브 빠른 관리"},
-    {"✓ 已检测到存档：save/save_0/ROBO13.DAT", "✓ 已檢測到存檔：save/save_0/ROBO13.DAT", "✓ Save found: save/save_0/ROBO13.DAT", "✓ セーブデータ検出: save/save_0/ROBO13.DAT", "✓ 세이브 감지됨: save/save_0/ROBO13.DAT"},
+    {"✓ 已检测到存档：save/save_0", "✓ 已檢測到存檔：save/save_0", "✓ Save found: save/save_0", "✓ セーブデータ検出: save/save_0", "✓ 세이브 감지됨: save/save_0"},
     {"文件大小：%.2f MB（%llu 字节）", "檔案大小：%.2f MB（%llu 位元組）", "Size: %.2f MB (%llu bytes)", "サイズ: %.2f MB (%llu バイト)", "파일 크기: %.2f MB (%llu 바이트)"},
     {"修改时间：%s", "修改時間：%s", "Modified: %s", "更新日時: %s", "수정 시간: %s"},
-    {"未检测到存档（save/save_0/ROBO13.DAT）", "未檢測到存檔（save/save_0/ROBO13.DAT）", "No save found (save/save_0/ROBO13.DAT)", "セーブデータ未検出 (save/save_0/ROBO13.DAT)", "세이브 없음 (save/save_0/ROBO13.DAT)"},
+    {"未检测到存档（save/save_0）", "未檢測到存檔（save/save_0）", "No save found (save/save_0)", "セーブデータ未検出 (save/save_0)", "세이브 없음 (save/save_0)"},
     {"进入游戏并手动保存后，存档将保存在程序数据目录。", "進入遊戲並手動儲存後，存檔將儲存在程式資料目錄。", "After saving in-game, save files are stored inside the workspace save/ folder.", "ゲーム内でセーブすると作業ディレクトリ内に保存されます。", "게임 내에서 저장하면 데이터 작업 경로에 보관됩니다."},
     {"打开存档目录", "開啟存檔目錄", "Open Save Folder", "セーブフォルダを開く", "세이브 폴더 열기"},
     {"一键备份存档", "一鍵備份存檔", "Backup Save", "今すぐバックアップ", "원클릭 백업"},
@@ -135,18 +128,18 @@ static const Entry k_table[STR_COUNT] = {
 
     // Quick settings card
     {"启动前配置", "啟動前配置", "Pre-Launch Setup", "起動前設定", "실행 전 설정"},
-    {"进入游戏前即可配置显示、超采样、垂直同步、游戏语言、音频声道与完整手柄/键鼠映射，自动保存至 13sentinels.ini。", "進入遊戲前即可配置顯示、超採樣、垂直同步、遊戲語言、音訊聲道與完整手把/鍵鼠映射，自動儲存至 13sentinels.ini。", "Configure display, supersampling, VSync, game language, audio, and full controller/KB&M bindings before launch.", "表示モード、超解像、VSync、言語、音声、キーコンフィグを起動前に設定できます。", "실행 전 화면, 업스케일, 수직 동기화, 게임 언어, 오디오 및 키 매핑을 설정할 수 있습니다."},
+    {"进入游戏前即可配置显示、垂直同步、游戏语言、音频声道与完整手柄/键鼠映射，自动保存至 yokaiwatch1.ini。", "進入遊戲前即可配置顯示、垂直同步、遊戲語言、音訊聲道與完整手把/鍵鼠映射，自動儲存至 yokaiwatch1.ini。", "Configure display, VSync, game language, audio, and full controller/KB&M bindings before launch (yokaiwatch1.ini).", "表示モード、VSync、言語、音声、キーコンフィグを起動前に設定できます（yokaiwatch1.ini）。", "실행 전 화면, 수직 동기화, 게임 언어, 오디오 및 키 매핑을 설정할 수 있습니다(yokaiwatch1.ini)."},
     {"画面与显示设置", "畫面與顯示設定", "Display & Video", "画面・表示設定", "화면 및 디스플레이"},
     {"音频与声道设置", "音訊與聲道設定", "Audio & Output", "オーディオ設定", "오디오 및 채널"},
     {"控制与键鼠改键", "控制與鍵鼠改鍵", "Controls & Remap", "操作・キー設定", "조작 및 키 매핑"},
     {"高级与系统选项", "進階與系統選項", "Advanced & System", "詳細・システム", "고급 및 시스템"},
 
     // Loading animation
-    {"正在启动《十三机兵防卫圈》", "正在啟動《十三機兵防衛圈》", "Launching 13 Sentinels: Aegis Rim", "『十三機兵防衛圏』を起動中", "『13기병방위권』 실행 중"},
+    {"正在启动《妖怪手表 1》", "正在啟動《妖怪手錶 1》", "Launching Yo-kai Watch 1", "『妖怪ウォッチ1』を起動中", "『요괴워치 1』 실행 중"},
     {"正在校验游戏资源与版本配置...", "正在校驗遊戲資源與版本配置...", "Validating game assets and build table...", "ゲームデータとバージョンを検証中...", "게임 리소스 및 버전 확인 중..."},
-    {"正在加载静态重编译核心模块 (lasgame_*.dll)...", "正在載入靜態重編譯核心模組 (lasgame_*.dll)...", "Loading recompiled game module (lasgame_*.dll)...", "リコンパイルモジュールを読み込み中...", "정적 리컴파일 모듈 로딩 중 (lasgame_*.dll)..."},
+    {"正在加载静态重编译核心模块 (yw1game_*.dll)...", "正在載入靜態重編譯核心模組 (yw1game_*.dll)...", "Loading recompiled game module (yw1game_*.dll)...", "リコンパイルモジュールを読み込み中...", "정적 리컴파일 모듈 로딩 중 (yw1game_*.dll)..."},
     {"正在装载可执行镜像与数据段 (exefs)...", "正在裝載可執行鏡像與資料段 (exefs)...", "Loading executable images (exefs)...", "実行イメージを読み込み中 (exefs)...", "실행 이미지 로드 중 (exefs)..."},
-    {"正在初始化主机内核服务与 Vulkan 渲染管线...", "正在初始化主機核心服務與 Vulkan 渲染管線...", "Initializing Switch services and Vulkan pipelines...", "システムサービスと描画パイプラインを初期化中...", "시스템 서비스 및 Vulkan 파이프라인 초기화 중..."},
+    {"正在初始化主机内核服务与 OpenGL 渲染管线...", "正在初始化主機核心服務與 OpenGL 渲染管線...", "Initializing Switch services and OpenGL backend...", "システムサービスと OpenGL バックエンドを初期化中...", "시스템 서비스 및 OpenGL 백엔드 초기화 중..."},
     {"即将进入游戏画面，请稍候...", "即將進入遊戲畫面，請稍候...", "Preparing first frame, please wait...", "まもなくゲーム画面が表示されます...", "곧 게임 화면으로 진입합니다..."},
     {"系统装载中，请勿关闭窗口", "系統裝載中，請勿關閉視窗", "Booting runtime, please wait...", "起動処理中...", "로딩 중입니다. 잠시만 기다려 주세요"},
 
@@ -169,29 +162,19 @@ static const Entry k_table[STR_COUNT] = {
     {"画面比例", "畫面比例", "Aspect Ratio", "アスペクト比", "화면 비율"},
     {"锁定 16:9", "鎖定 16:9", "Locked 16:9", "16:9 固定", "16:9 고정"},
     {"铺满拉伸", "鋪滿拉伸", "Stretch", "画面に合わせる", "화면 채우기"},
-    {"锁定 16:9：保持十三机兵原生 16:9 比例居中留黑边；铺满拉伸：铺满当前输出窗口。", "鎖定 16:9：保持十三機兵原生 16:9 比例置中留黑邊；鋪滿拉伸：鋪滿當前輸出視窗。", "Locked 16:9 preserves native aspect ratio with letterbox/pillarbox bars; Stretch fills the window.", "16:9 固定はアスペクト比を維持して黒帯を表示し、ストレッチはウィンドウ全体に表示します。", "16:9 고정은 원본 비율을 유지하며, 화면 채우기는 창 전체에 맞춥니다."},
+    {"锁定 16:9：保持游戏原生 16:9 比例居中留黑边；铺满拉伸：铺满当前输出窗口。", "鎖定 16:9：保持遊戲原生 16:9 比例置中留黑邊；鋪滿拉伸：鋪滿當前輸出視窗。", "Locked 16:9 preserves native aspect ratio with letterbox/pillarbox bars; Stretch fills the window.", "16:9 固定はアスペクト比を維持して黒帯を表示し、ストレッチはウィンドウ全体に表示します。", "16:9 고정은 원본 비율을 유지하며, 화면 채우기는 창 전체에 맞춥니다."},
     {"垂直同步", "垂直同步", "VSync Mode", "垂直同期 (VSync)", "수직 동기화"},
-    {"Mailbox 低延迟", "Mailbox 低延遲", "Mailbox (Low Latency)", "Mailbox (低遅延)", "Mailbox (저지연)"},
-    {"FIFO 严格同步", "FIFO 嚴格同步", "FIFO (Strict VSync)", "FIFO (厳格同期)", "FIFO (엄격 동기)"},
-    {"Immediate 关闭", "Immediate 關閉", "Immediate (Off)", "Immediate (オフ)", "Immediate (끄기)"},
-    {"修改后立即重建 Vulkan 交换链：Mailbox 兼顾低延迟与无撕裂；FIFO 严格锁定刷新率；Immediate 关闭等待。", "修改後立即重建 Vulkan 交換鏈：Mailbox 兼顧低延遲與無撕裂；FIFO 嚴格鎖定更新率；Immediate 關閉等待。", "Applies immediately: Mailbox gives tear-free low latency; FIFO locks refresh rate; Immediate disables VSync.", "即時反映されます：Mailbox は遅延とティアリングを抑え、FIFO はリフレッシュレートに同期します。", "즉시 적용됩니다: Mailbox는 저지연 무티어링, FIFO는 주사율 동기, Immediate는 해제입니다."},
-
-    {"内部渲染与超采样", "內部渲染與超採樣", "Internal Render Scale", "内部レンダリング", "내부 렌더링 배율"},
-    {"内部渲染倍率", "內部渲染倍率", "Render Scale", "レンダリング倍率", "렌더링 배율"},
-    {"1.0x 原生 (1080p)", "1.0x 原生 (1080p)", "1.0x Native (1080p)", "1.0x 等倍 (1080p)", "1.0x 원본 (1080p)"},
-    {"1.5x (1440p) [实验性]", "1.5x (1440p) [實驗性]", "1.5x (1440p) [Exp]", "1.5x (1440p) [実験的]", "1.5x (1440p) [실험적]"},
-    {"2.0x (4K) [实验性]", "2.0x (4K) [實驗性]", "2.0x (4K) [Exp]", "2.0x (4K) [実験的]", "2.0x (4K) [실험적]"},
-    {"内部渲染倍率。\n\n1.0x 原生最稳定推荐；1.5x 与 2.0x 为实验性超采样，将大幅增加 GPU 负载。\n\n当前内部分辨率：%.0f × %.0f", "內部渲染倍率。\n\n1.0x 原生最穩定推薦；1.5x 與 2.0x 為實驗性超採樣，將大幅增加 GPU 負載。\n\n當前內部解析度：%.0f × %.0f", "Internal render multiplier.\n\n1.0x is recommended; 1.5x/2.0x increase GPU load significantly.\n\nCurrent internal resolution: %.0f x %.0f", "内部解像度倍率。\n1.0x が安定推奨。1.5x / 2.0x は高負荷です。\n現在: %.0f x %.0f", "내부 렌더링 배율입니다.\n1.0x 권장, 1.5x/2.0x는 GPU 부하가 큽니다.\n현재 내부 해상도: %.0f x %.0f"},
-    {"图像缩放滤镜", "圖像縮放濾鏡", "Upscale Filter", "アップスケーラー", "업스케일 필터"},
-    {"双线性 (Bilinear)", "雙線性 (Bilinear)", "Bilinear", "バイリニア", "바이리니어"},
-    {"输出分辨率与内部分辨率不一致时使用的放大锐化滤镜。", "輸出解析度與內部解析度不一致時使用的放大銳化濾鏡。", "Scaling filter used when window resolution differs from internal render resolution.", "ウィンドウ解像度と内部解像度が異なる場合のスケーリングフィルタ。", "출력 해상도와 내부 해상도가 다를 때 사용하는 보간/샤프닝 필터입니다."},
+    {"自适应垂直同步", "自適應垂直同步", "Adaptive VSync", "Adaptive VSync", "Adaptive VSync"},
+    {"开启垂直同步", "開啟垂直同步", "VSync On", "VSync オン", "VSync 켜기"},
+    {"关闭同步 (Immediate)", "關閉同步 (Immediate)", "Off (Immediate)", "VSync オフ", "해제 (Immediate)"},
+    {"修改后立即更新 OpenGL 交换间隔：自适应兼顾低延迟与防撕裂；开启锁定刷新率；Immediate 关闭等待。", "修改後立即更新 OpenGL 交換間隔：自適應兼顧低延遲與防撕裂；開啟鎖定更新率；Immediate 關閉等待。", "Applies immediately: Adaptive balances low latency and tear-free display; On locks to refresh rate; Immediate disables wait.", "即時反映されます：Adaptive は遅延とティアリングを抑え、VSync オンはリフレッシュレートに同期します。", "즉시 적용됩니다: Adaptive는 저지연 무티어링, VSync 켜기는 주사율 동기, Immediate는 해제입니다."},
 
     {"监控与运行节奏", "監控與運行節奏", "HUD & Speed", "パフォーマンスと速度", "성능 및 배속"},
     {"性能监控 HUD", "效能監控 HUD", "Performance HUD", "パフォーマンス HUD", "성능 모니터 HUD"},
     {"关闭", "關閉", "Off", "オフ", "끄기"},
     {"仅 FPS", "僅 FPS", "FPS Only", "FPS のみ", "FPS만 표시"},
     {"详细监控", "詳細監控", "Detailed", "詳細表示", "상세 모니터"},
-    {"在画面右上角显示实时 FPS、帧耗时、绘制次数及 GPU 等待时长。", "在畫面右上角顯示即時 FPS、幀耗時、繪製次數及 GPU 等待時長。", "Shows real-time FPS, frame time, draw calls, and GPU sync wait in the top-right corner.", "右上に FPS・フレーム時間・描画数・GPU待機時間を表示します。", "화면 우상단에 FPS, 프레임 시간, 드로우 수, GPU 대기 시간을 표시합니다."},
+    {"在画面右上角显示实时 FPS、帧耗时、绘制次数及 OpenGL 状态信息。", "在畫面右上角顯示即時 FPS、幀耗時、繪製次數及 OpenGL 狀態資訊。", "Shows real-time FPS, frame time, draw calls, and OpenGL stats in the top-right corner.", "右上に FPS・フレーム時間・描画数・OpenGL 状態を表示します。", "화면 우상단에 FPS, 프레임 시간, 드로우 수, OpenGL 상태를 표시합니다."},
     {"快进倍速控制", "快進倍速控制", "Speed Multiplier", "早送り倍率", "빠른 배속"},
     {"1x 正常", "1x 正常", "1x Normal", "1x 通常", "1x 보통"},
     {"2x 快进", "2x 快進", "2x Fast", "2x 早送り", "2x 배속"},
@@ -215,33 +198,20 @@ static const Entry k_table[STR_COUNT] = {
 
     // System & Advanced Tab
     {"语言与界面", "語言與介面", "Language & UI", "言語とインターフェース", "언어 및 인터페이스"},
-    {"底层渲染同步 [均推荐保持开启]", "底層渲染同步 [均推薦保持開啟]", "Vulkan Sync Options [Keep On]", "Vulkan 同期設定 [推奨: オン]", "Vulkan 동기화 옵션 [유지 권장]"},
-    {"展开底层 Vulkan 同步开关", "展開底層 Vulkan 同步開關", "Show Advanced Vulkan Toggles", "詳細 Vulkan スイッチを表示", "고급 Vulkan 동기화 옵션 표시"},
-    {"警告：下方三项用于保证十三机兵零闪烁与零画面错乱，除非研发排查否则建议全部保持开启。", "警告：下方三項用於保證十三機兵零閃爍與零畫面錯亂，除非研發排查否則建議全部保持開啟。", "Warning: these low-level sync guards prevent flicker and corruption in 13 Sentinels; keep all enabled.", "警告：ちらつきや描画崩れを防ぐ同期機能です。検証時以外はすべてオンを推奨します。", "경고: 깜빡임과 화면 깨짐을 방지하는 동기화 옵션입니다. 모두 켜둠을 권장합니다."},
-    {"管线编译等待 [推荐保持开启]", "管線編譯等待 [推薦保持開啟]", "Wait Compiling Pipelines [Rec]", "パイプライン待機 [推奨]", "파이프라인 컴파일 대기 [권장]"},
-    {"录制队列等待管线编译完成后再提交绘制，关闭可能导致闪烁。", "錄製佇列等待管線編譯完成後再提交繪製，關閉可能導致閃爍。", "Recorder waits for shader pipelines to finish compiling before recording draws.", "シェーダーパイプラインのコンパイル完了を待機してから記録します。", "녹화 스레드가 셰이더 파이프라인 컴파일 완료를 기다립니다."},
-    {"顶点隔离拷贝 [推荐保持开启]", "頂點隔離拷貝 [推薦保持開啟]", "Copy Dynamic Vertices [Rec]", "頂点バッファ分離コピー [推奨]", "정점/인덱스 분리 복사 [권장]"},
-    {"为每帧顶点与索引缓冲创建瞬态快照副本，关闭可能导致快进错乱。", "為每幀頂點與索引緩衝建立瞬態快照副本，關閉可能導致快進錯亂。", "Copies vertex/index buffers safely into transient GPU memory to prevent fast-forward corruption.", "頂点・インデックスデータをフレーム毎に安全にコピーします。", "정점 및 인덱스 데이터를 프레임별로 복사하여 경합을 방지합니다."},
-    {"CPU-GPU 帧重叠 [推荐保持开启]", "CPU-GPU 幀重疊 [推薦保持開啟]", "CPU-GPU Frame Overlap [Rec]", "CPU-GPU オーバーラップ [推奨]", "CPU-GPU 프레임 중첩 [권장]"},
-    {"允许 GPU 重叠处理帧命令以保持 60 FPS；关闭将显著掉帧。", "允許 GPU 重疊處理幀命令以保持 60 FPS；關閉將顯著掉幀。", "Allows GPU overlap for full 60 FPS throughput; disabling forces strict frame stalling.", "GPU 処理をオーバーラップして 60 FPS を維持します。", "GPU 처리를 중첩하여 60 FPS를 유지합니다."},
-    {"着色器缓存管理", "著色器快取管理", "Shader Cache", "シェーダーキャッシュ", "셰이더 캐시 관리"},
-    {"一键清理着色器缓存", "一鍵清理著色器快取", "Clear Shader Cache", "シェーダーキャッシュ削除", "셰이더 캐시 삭제"},
-    {"清理 cache/spirv/ 与磁盘管线缓存。\n\n清理后游戏重新加载场景时会即时重新编译。", "清理 cache/spirv/ 與磁碟管線快取。\n\n清理後遊戲重新載入場景時會即時重新編譯。", "Clears cache/spirv/ and disk Vulkan pipeline caches; shaders will recompile automatically as needed.", "cache/spirv/ とパイプラインキャッシュを削除します。", "cache/spirv/ 및 Vulkan 파이프라인 캐시를 정리합니다."},
-    {"已清理着色器缓存（移除 %d 个缓存文件）。", "已清理著色器快取（移除 %d 個快取檔案）。", "Cleared shader cache (%d files removed).", "キャッシュを削除しました（%d ファイル）。", "셰이더 캐시가 정리되었습니다(%d개 파일 삭제)."},
     {"系统与退出", "系統與退出", "System & Exit", "システムと終了", "시스템 및 종료"},
     {"返回启动前端", "返回啟動前端", "Return to Launcher", "ランチャーへ戻る", "런처로 돌아가기"},
     {"结束当前运行并返回启动前端界面（未保存的进度将丢失）。", "結束當前運行並返回啟動前端介面（未儲存的進度將遺失）。", "Stops the game and returns to the launcher (unsaved progress will be lost).", "ゲームを終了してランチャーへ戻ります（未保存データは失われます）。", "게임을 종료하고 런처로 돌아갑니다(저장하지 않은 진행은 손실됩니다)."},
     {"当前已在启动前端中。", "當前已在啟動前端中。", "Currently in the launcher.", "現在はランチャー画面です。", "현재 런처 화면입니다."},
     {"退出游戏", "退出遊戲", "Exit Application", "アプリを終了", "프로그램 종료"},
-    {"保存当前配置并关闭程序（未保存的进度将丢失）。", "儲存當前配置並關閉程式（未儲存的進度將遺失）。", "Saves settings and closes 13SentinelsRecomp (unsaved progress will be lost).", "設定を保存してアプリを終了します（未保存データは失われます）。", "설정을 저장하고 프로그램을 종료합니다(미저장 데이터 손실)."},
-    {"保存当前配置并关闭程序。", "儲存當前配置並關閉程式。", "Saves settings and exits 13SentinelsRecomp.", "設定を保存して終了します。", "설정을 저장하고 종료합니다."},
+    {"保存当前配置并关闭程序（未保存的进度将丢失）。", "儲存當前配置並關閉程式（未儲存的進度將遺失）。", "Saves settings and closes YokaiWatch1Recomp (unsaved progress will be lost).", "設定を保存してアプリを終了します（未保存データは失われます）。", "설정을 저장하고 프로그램을 종료합니다(미저장 데이터 손실)."},
+    {"保存当前配置并关闭程序。", "儲存當前配置並關閉程式。", "Saves settings and exits YokaiWatch1Recomp.", "設定を保存して終了します。", "설정을 저장하고 종료합니다."},
     {"确认返回启动前端", "確認返回啟動前端", "Confirm Return to Launcher", "ランチャーへ戻りますか？", "런처로 돌아가기 확인"},
     {"确认退出游戏", "確認退出遊戲", "Confirm Exit", "終了しますか？", "종료 확인"},
     {"未在游戏内主动保存的进度将会丢失，是否继续？", "未在遊戲內主動儲存的進度將會遺失，是否繼續？", "Progress since your last in-game save will be lost. Continue?", "未保存の進行状況は失われます。続行しますか？", "마지막 저장 이후의 진행 상황은 손실됩니다. 계속하시겠습니까?"},
     {"取消", "取消", "Cancel", "キャンセル", "취소"},
     {"留在当前界面。", "留在當前介面。", "Stay on current screen.", "現在の画面に留まります。", "현재 화면에 머뭅니다."},
-    {"当前存档：save/save_0/ROBO13.DAT\n大小：%.2f MB（%llu 字节）\n最后修改：%s", "當前存檔：save/save_0/ROBO13.DAT\n大小：%.2f MB（%llu 位元組）\n最後修改：%s", "Save file: save/save_0/ROBO13.DAT\nSize: %.2f MB (%llu bytes)\nModified: %s", "セーブ: save/save_0/ROBO13.DAT\nサイズ: %.2f MB (%llu バイト)\n更新: %s", "세이브: save/save_0/ROBO13.DAT\n크기: %.2f MB (%llu 바이트)\n수정: %s"},
-    {"当前未检测到存档（save/save_0/ROBO13.DAT 尚未生成）。", "當前未檢測到存檔（save/save_0/ROBO13.DAT 尚未生成）。", "No save file detected yet (save/save_0/ROBO13.DAT).", "セーブデータはまだありません (save/save_0/ROBO13.DAT)。", "세이브 파일이 아직 없습니다 (save/save_0/ROBO13.DAT)."},
+    {"当前存档：save/save_0\n大小：%.2f MB（%llu 字节）\n最后修改：%s", "當前存檔：save/save_0\n大小：%.2f MB（%llu 位元組）\n最後修改：%s", "Save folder: save/save_0\nSize: %.2f MB (%llu bytes)\nModified: %s", "セーブ: save/save_0\nサイズ: %.2f MB (%llu バイト)\n更新: %s", "세이브: save/save_0\n크기: %.2f MB (%llu 바이트)\n수정: %s"},
+    {"当前未检测到存档（save/save_0 尚未生成）。", "當前未檢測到存檔（save/save_0 尚未生成）。", "No save folder detected yet (save/save_0).", "セーブデータはまだありません (save/save_0)。", "세이브 파일이 아직 없습니다 (save/save_0)."},
     {"将当前存档复制备份到 save_backups/ 目录。", "將當前存檔複製備份到 save_backups/ 目錄。", "Copies the active save file into save_backups/.", "現在のセーブデータを save_backups/ へコピーします。", "현재 세이브 파일을 save_backups/ 폴더에 백업합니다."},
 
     // Controls UI
@@ -335,7 +305,7 @@ static const Entry k_table[STR_COUNT] = {
     {"取消构建", "取消構建", "Cancel Build", "構築キャンセル", "빌드 취소"},
     {"✓ 游戏代码模块本地构建完成！", "✓ 遊戲程式碼模組本地構建完成！", "✓ Game module built successfully!", "✓ ゲームモジュールの構築が完了しました！", "✓ 게임 모듈 빌드가 완료되었습니다!"},
     {"× 本地构建失败：", "× 本地構建失敗：", "× Local build failed: ", "× 構築に失敗しました: ", "× 로컬 빌드 실패: "},
-    {"× 本机构建工具链不完整（缺少 lasgen / zig / 13SentinelsRecomp.dll.a）。请确认发布包完整。", "× 本機構建工具鏈不完整（缺少 lasgen / zig / 13SentinelsRecomp.dll.a）。請確認發佈包完整。", "× Local build toolchain incomplete (missing lasgen / zig / 13SentinelsRecomp.dll.a).", "× ビルドツールチェーンが見つかりません (lasgen / zig / implib)。", "× 로컬 빌드 도구가 누락되었습니다 (lasgen / zig / 13SentinelsRecomp.dll.a)."},
+    {"× 本机构建工具链不完整（缺少 lasgen / zig / YokaiWatch1Recomp.dll.a）。请确认发布包完整。", "× 本機構建工具鏈不完整（缺少 lasgen / zig / YokaiWatch1Recomp.dll.a）。請確認發佈包完整。", "× Local build toolchain incomplete (missing lasgen / zig / YokaiWatch1Recomp.dll.a).", "× ビルドツールチェーンが見つかりません (lasgen / zig / implib)。", "× 로컬 빌드 도구가 누락되었습니다 (lasgen / zig / YokaiWatch1Recomp.dll.a)."},
     {"提示：本发行包未内置 .nsp/.xci 解包器，请直接选择已解包的 exefs/romfs 文件夹。", "提示：本發佈包未內建 .nsp/.xci 解包器，請直接選擇已解包的 exefs/romfs 資料夾。", "Note: No package extractor is bundled; please select an already-extracted exefs/romfs folder.", "注: パッケージ展開ツールは同梱されていません。展開済みの exefs/romfs フォルダを直接選択してください。", "안내: 패키지 추출 도구가 포함되지 않았습니다. 추출된 exefs/romfs 폴더를 직접 선택하세요."},
 };
 

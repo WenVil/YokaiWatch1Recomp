@@ -1,11 +1,7 @@
-// In-game overlay menu (Dear ImGui). Open with F1 / Esc, or Minus+Plus (Back+Start) on a controller.
+// In-game overlay menu (Dear ImGui + OpenGL 3.2+). Open with F1 / Esc, or Minus+Plus (Back+Start) on a controller.
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
-
-#ifdef __OBJC__
-#import <Metal/Metal.h>
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,13 +15,11 @@ bool menu_is_open(void);
 // Main thread: apply window requests (fullscreen) made from the menu.
 void menu_apply_window_requests(void *sdl_window);
 
-#if defined(__APPLE__) && defined(__OBJC__)
-// Render thread: draw the overlay into the drawable after the game image (no-op while closed).
-void menu_render(id<MTLDevice> dev, id<MTLCommandBuffer> cb, id<MTLTexture> target);
-#elif !defined(__APPLE__)
-// Render thread, inside the window image's rendering (Vulkan command buffer cmd).
-void menu_render(void *cmd, uint32_t target_w, uint32_t target_h);
-#endif
+// Render thread (guest OpenGL context active): prepare/render the overlay onto FBO 0 (no-op while closed).
+bool menu_prepare_frame(uint32_t target_h, bool loading);
+void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_density);
+void menu_set_open_for_test(bool open);
+void menu_set_tab_for_test(int tab_idx);
 
 #ifdef __cplusplus
 }

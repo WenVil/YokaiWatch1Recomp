@@ -1,8 +1,6 @@
-// macOS / Linux session log (included by macos.c and linux.c): lasrecomp.log in the data folder is always the latest
-// run; a new start moves the previous one aside as lasrecomp-backup-<YYYYMMDD-HHMMSS>-<pid>.log (its last write, the
-// pid from its first line, 0 if unknown) and keeps the five newest of those, as on Windows. Moving instead of
-// truncating also means a copy still running or quitting keeps writing to its own (moved) file. Processes started by
-// this one (the start screen re-executing itself for the game) get LASRECOMP_LOG_APPEND and append to the same log.
+// macOS / Linux session log (included by macos.c and linux.c): yokaiwatch1recomp.log in the data folder is always
+// the latest run; a new start moves the previous one aside as yokaiwatch1recomp-backup-<YYYYMMDD-HHMMSS>-<pid>.log
+// and keeps the five newest.
 #pragma once
 #include <dirent.h>
 #include <stdbool.h>
@@ -29,9 +27,9 @@ static void session_log_backup(const char *dir, const char *name) {
     }
     char when[32];
     strftime(when, sizeof when, "%Y%m%d-%H%M%S", localtime(&st.st_mtime));
-    snprintf(to, sizeof to, "%s/lasrecomp-backup-%s-%d.log", dir, when, pid);
+    snprintf(to, sizeof to, "%s/yokaiwatch1recomp-backup-%s-%d.log", dir, when, pid);
     for (int i = 1; access(to, F_OK) == 0 && i < 100; i++)  // (never replace another backup)
-        snprintf(to, sizeof to, "%s/lasrecomp-backup-%s-%d-%d.log", dir, when, pid, i);
+        snprintf(to, sizeof to, "%s/yokaiwatch1recomp-backup-%s-%d-%d.log", dir, when, pid, i);
     rename(from, to);
 }
 
@@ -50,7 +48,7 @@ static void session_log_prune(const char *dir) {
     char path[1400];
     for (struct dirent *e; (e = readdir(d));) {
         size_t len = strlen(e->d_name);
-        if (strncmp(e->d_name, "lasrecomp-backup-", 17) || len < 22 || len >= sizeof logs->name ||
+        if (strncmp(e->d_name, "yokaiwatch1recomp-backup-", 25) || len < 30 || len >= sizeof logs->name ||
             strcmp(e->d_name + len - 4, ".log")) continue;
         struct stat st;
         snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
@@ -74,11 +72,11 @@ static void session_log_prune(const char *dir) {
 
 // stdout / stderr -> <dir>/lasrecomp.log (path_out: its path, emptied on failure).
 static void session_log_open(const char *dir, char *path_out, size_t n) {
-    snprintf(path_out, n, "%s/lasrecomp.log", dir);
+    snprintf(path_out, n, "%s/yokaiwatch1recomp.log", dir);
     bool append = getenv("LASRECOMP_LOG_APPEND") != NULL;
     if (!append) {
         session_log_backup(dir, "lasrecomp.prev.log");  // (the earlier macOS scheme's one backup)
-        session_log_backup(dir, "lasrecomp.log");
+        session_log_backup(dir, "yokaiwatch1recomp.log");
         session_log_prune(dir);
     }
     if (!freopen(path_out, "a", stderr)) { path_out[0] = 0; return; }

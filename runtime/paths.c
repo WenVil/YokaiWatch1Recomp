@@ -149,7 +149,7 @@ void rt_set_headless(bool headless) { g_headless = headless; }
 
 static void fail(const char *msg) {
     fprintf(stderr, "%s\n", msg);
-    if (!g_headless) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "13SentinelsRecomp", msg, NULL);
+    if (!g_headless) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Yo-kai Watch 1 Recompiled", msg, NULL);
     exit(1);
 }
 
@@ -162,8 +162,8 @@ bool rt_dev_mode(void) { return g_dev; }
 #define NOTE_FROM ".lasrecomp_move_from"        // in a move's destination: the old folder, still to be emptied
 #define MARK_PARTIAL ".lasrecomp_incomplete"    // in a move's destination until its copy was checked
 // What a data folder holds (and a move takes along). Logs stay where they are.
-static const char *const DATA_ENTRIES[] = {"save", "save_backups", "rando", "13sentinels.ini", "larecomp.ini",
-                                           "fonts", "gamecontrollerdb.txt", "cache", "extracted"};
+static const char *const DATA_ENTRIES[] = {"save", "save_backups", "yokaiwatch1.ini",
+                                           "larecomp.ini", "fonts", "gamecontrollerdb.txt", "cache", "extracted"};
 #define N_ENTRIES (sizeof DATA_ENTRIES / sizeof *DATA_ENTRIES)
 static char g_home[1024];  // the platform's folder (where POINTER_FILE lives)
 
@@ -182,10 +182,9 @@ static void default_home(char *root, size_t n) {
 #ifdef _WIN32
     exe_dir(root, n);
 #elif defined(__linux__)
-    // (the AppImage is read-only): $XDG_DATA_HOME/lasrecomp, ~/.local/share/lasrecomp by default
     const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
-    if (xdg && *xdg == '/') snprintf(root, n, "%s/lasrecomp", xdg);
-    else snprintf(root, n, "%s/.local/share/lasrecomp", home && *home ? home : "/tmp");
+    if (xdg && *xdg == '/') snprintf(root, n, "%s/yokaiwatch1recomp", xdg);
+    else snprintf(root, n, "%s/.local/share/yokaiwatch1recomp", home && *home ? home : "/tmp");
 #else
     const char *home = getenv("HOME");
     snprintf(root, n, "%s/Library/Application Support/" RT_BUNDLE_ID, home && *home ? home : "/tmp");
@@ -373,12 +372,12 @@ void rt_paths_init(void) {
         while (pointer_root(g_home, ptr, sizeof ptr)) {  // another folder chosen on the start screen
             if (is_dir(ptr) && writable(ptr)) { snprintf(root, sizeof root, "%s", ptr); break; }
             char msg[1400];
-            snprintf(msg, sizeof msg, "13SentinelsRecomp's data folder isn't available:\n%s\n\nIf it's on a drive that isn't "
+            snprintf(msg, sizeof msg, "YokaiWatch1Recomp's data folder isn't available:\n%s\n\nIf it's on a drive that isn't "
                      "connected, connect it and try again.", ptr);
             const SDL_MessageBoxButtonData b[] = {{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Try again"},
                                                   {0, 1, "Use the default folder"},
                                                   {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 2, "Quit"}};
-            const SDL_MessageBoxData box = {SDL_MESSAGEBOX_WARNING, NULL, "13SentinelsRecomp", msg, 3, b, NULL};
+            const SDL_MessageBoxData box = {SDL_MESSAGEBOX_WARNING, NULL, "YokaiWatch1Recomp", msg, 3, b, NULL};
             int k = 2;
             if (g_headless || !SDL_ShowMessageBox(&box, &k)) fprintf(stderr, "%s\n", msg);
             if (k == 2) exit(1);
@@ -393,11 +392,11 @@ void rt_paths_init(void) {
     char msg[1400];
     if (!is_dir(root) || !writable(root) || utf8_chdir(root) != 0) {
 #ifdef _WIN32
-        snprintf(msg, sizeof msg, "13SentinelsRecomp can't write to its folder:\n%s\n\nIt keeps game files, saves and builds "
-                 "next to the program. Move the \"13SentinelsRecomp\" folder somewhere you can write to (e.g. Documents or "
+        snprintf(msg, sizeof msg, "YokaiWatch1Recomp can't write to its folder:\n%s\n\nIt keeps game files, saves and builds "
+                 "next to the program. Move the \"YokaiWatch1Recomp\" folder somewhere you can write to (e.g. Documents or "
                  "Desktop, not Program Files) and start it again.", root);
 #else
-        snprintf(msg, sizeof msg, "13SentinelsRecomp can't write to its data folder:\n%s", root);
+        snprintf(msg, sizeof msg, "YokaiWatch1Recomp can't write to its data folder:\n%s", root);
 #endif
         fail(msg);
     }
@@ -595,7 +594,7 @@ static unsigned long long entries_size(const char *dir) {
     return n;
 }
 
-// 13SentinelsRecomp's data (an unfinished copy too), or nothing yet
+// YokaiWatch1Recomp's data (an unfinished copy too), or nothing yet
 static bool usable_dir(const char *dir) {
     char p[1100];
     join(p, sizeof p, dir, MARK_PARTIAL);
@@ -610,10 +609,9 @@ void rt_data_target(const char *picked, RtDataTarget *t) {
         snprintf(t->refuse, sizeof t->refuse, "That folder can't be opened.");
         return;
     }
-    // the folder itself when it's empty, 13SentinelsRecomp's data, or the platform's folder; otherwise a "13SentinelsRecomp"
-    // folder in it
+    // the folder itself when it's empty, YokaiWatch1Recomp's data, or the platform's folder; otherwise "YokaiWatch1Recomp"
     if (same_dir(r, g_home) || usable_dir(r)) snprintf(t->path, sizeof t->path, "%s", r);
-    else join(t->path, sizeof t->path, r, "13SentinelsRecomp");
+    else join(t->path, sizeof t->path, r, "YokaiWatch1Recomp");
     join(p, sizeof p, t->path, MARK_PARTIAL);
     t->has_data = has_entries(t->path) && !exists(p);
     t->bytes = entries_size(g_root);
@@ -625,7 +623,7 @@ void rt_data_target(const char *picked, RtDataTarget *t) {
     else if (within(t->path, root)) snprintf(t->refuse, sizeof t->refuse, "That folder is inside the data folder.");
     else if (within(root, t->path)) snprintf(t->refuse, sizeof t->refuse, "That folder holds the data folder.");
     else if (in_app(r)) snprintf(t->refuse, sizeof t->refuse, "That folder is inside the app.");
-    else if (!writable(r)) snprintf(t->refuse, sizeof t->refuse, "13SentinelsRecomp can't write to that folder.");
+    else if (!writable(r)) snprintf(t->refuse, sizeof t->refuse, "Yo-kai Watch 1 Recompiled can't write to that folder.");
     else if (!same_dir(t->path, g_home) && !usable_dir(t->path))
         snprintf(t->refuse, sizeof t->refuse, "Choose an empty folder.");
 }
@@ -787,7 +785,7 @@ static bool prepare_target(const char *to, char *err, size_t n) {
     char p[1100];
     mkdirs(to);
     if (!is_dir(to) || !writable(to)) {
-        snprintf(err, n, "13SentinelsRecomp can't write to %s.", to);
+        snprintf(err, n, "Yo-kai Watch 1 Recompiled can't write to %s.", to);
         return false;
     }
     join(p, sizeof p, to, MARK_PARTIAL);
@@ -818,7 +816,7 @@ bool rt_data_move(const char *to, void (*progress)(int step, double frac), char 
         return false;
     }
     if (has_entries(abs_to)) {
-        snprintf(err, n, "That folder already has 13SentinelsRecomp data.");
+        snprintf(err, n, "That folder already has Yo-kai Watch 1 Recompiled data.");
         return false;
     }
     Move m = {progress, 0, entries_size(from), 0, err, n, malloc(MOVE_BUF), malloc(MOVE_BUF)};
@@ -896,45 +894,11 @@ bool rt_find_subdir_icase(const char *parent, const char *name, char *out, size_
     return false;
 }
 
-bool rt_save_info(bool *exists_out, uint64_t *size_out, int64_t *mtime_sec_out) {
-    uint64_t sz = 0;
-    int64_t mt = 0;
-    bool ok = plat_file_info("save/save_0/ROBO13.DAT", &sz, &mt);
-    if (exists_out) *exists_out = ok;
-    if (size_out) *size_out = ok ? sz : 0;
-    if (mtime_sec_out) *mtime_sec_out = ok ? mt : 0;
-    return ok;
-}
-
-bool rt_save_backup(char *out_rel, size_t cap, char *err, size_t err_cap) {
-    if (out_rel && cap) out_rel[0] = 0;
-    if (err && err_cap) err[0] = 0;
-    const char *src = "save/save_0/ROBO13.DAT";
-    if (!plat_path_exists(src)) {
-        if (err) snprintf(err, err_cap, "未找到存档文件 (save/save_0/ROBO13.DAT)");
-        return false;
-    }
-    time_t now = time(NULL);
-    struct tm tmv;
-#ifdef _WIN32
-    localtime_s(&tmv, &now);
-#else
-    localtime_r(&now, &tmv);
-#endif
-    char stamp[32];
-    strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tmv);
-    char dir[256], dst[320];
-    snprintf(dir, sizeof dir, "save_backups/backup_%s", stamp);
-    snprintf(dst, sizeof dst, "%s/ROBO13.DAT", dir);
-    if (!plat_mkdir_p(dir)) {
-        if (err) snprintf(err, err_cap, "无法创建备份目录 %s", dir);
-        return false;
-    }
+static bool copy_one_save_file(const char *src, const char *dst) {
     FILE *in = plat_fopen(src, "rb"), *out = plat_fopen(dst, "wb");
     if (!in || !out) {
         if (in) fclose(in);
         if (out) fclose(out);
-        if (err) snprintf(err, err_cap, "无法读取或写入备份文件");
         return false;
     }
     char buf[65536];
@@ -946,11 +910,88 @@ bool rt_save_backup(char *out_rel, size_t cap, char *err, size_t err_cap) {
     if (ferror(in)) io_ok = false;
     fclose(in);
     if (fclose(out) != 0) io_ok = false;
-    if (!io_ok) {
+    return io_ok;
+}
+
+bool rt_save_info(bool *exists_out, uint64_t *size_out, int64_t *mtime_sec_out) {
+    uint64_t total_sz = 0;
+    int64_t max_mt = 0;
+    bool found = false;
+    PlatDir *d = plat_opendir("save/save_0");
+    if (d) {
+        char entry[512];
+        bool is_d = false;
+        while (plat_readdir(d, entry, sizeof entry, &is_d, NULL)) {
+            if (is_d || entry[0] == '.') continue;
+            size_t len = strlen(entry);
+            if (len > 8 && !strcmp(entry + len - 8, ".pending")) continue;
+            char p[768];
+            snprintf(p, sizeof p, "save/save_0/%s", entry);
+            uint64_t fsz = 0;
+            int64_t fmt = 0;
+            if (plat_file_info(p, &fsz, &fmt)) {
+                found = true;
+                total_sz += fsz;
+                if (fmt > max_mt) max_mt = fmt;
+            }
+        }
+        plat_closedir(d);
+    }
+    if (exists_out) *exists_out = found;
+    if (size_out) *size_out = found ? total_sz : 0;
+    if (mtime_sec_out) *mtime_sec_out = found ? max_mt : 0;
+    return found;
+}
+
+bool rt_save_backup(char *out_rel, size_t cap, char *err, size_t err_cap) {
+    if (out_rel && cap) out_rel[0] = 0;
+    if (err && err_cap) err[0] = 0;
+    bool has_save = false;
+    rt_save_info(&has_save, NULL, NULL);
+    if (!has_save) {
+        if (err) snprintf(err, err_cap, "未找到存档文件 (save/save_0)");
+        return false;
+    }
+    time_t now = time(NULL);
+    struct tm tmv;
+#ifdef _WIN32
+    localtime_s(&tmv, &now);
+#else
+    localtime_r(&now, &tmv);
+#endif
+    char stamp[32];
+    strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tmv);
+    char dir[256];
+    snprintf(dir, sizeof dir, "save_backups/backup_%s", stamp);
+    if (!plat_mkdir_p(dir)) {
+        if (err) snprintf(err, err_cap, "无法创建备份目录 %s", dir);
+        return false;
+    }
+    PlatDir *d = plat_opendir("save/save_0");
+    if (!d) {
+        if (err) snprintf(err, err_cap, "无法打开存档目录 save/save_0");
+        return false;
+    }
+    char entry[512];
+    bool is_d = false;
+    int copied = 0;
+    bool io_ok = true;
+    while (plat_readdir(d, entry, sizeof entry, &is_d, NULL)) {
+        if (is_d || entry[0] == '.') continue;
+        size_t len = strlen(entry);
+        if (len > 8 && !strcmp(entry + len - 8, ".pending")) continue;
+        char src[768], dst[800];
+        snprintf(src, sizeof src, "save/save_0/%s", entry);
+        snprintf(dst, sizeof dst, "%s/%s", dir, entry);
+        if (!copy_one_save_file(src, dst)) { io_ok = false; break; }
+        copied++;
+    }
+    plat_closedir(d);
+    if (!io_ok || copied == 0) {
         if (err) snprintf(err, err_cap, "复制存档数据时发生 I/O 错误");
         return false;
     }
-    if (out_rel && cap) snprintf(out_rel, cap, "%s", dst);
+    if (out_rel && cap) snprintf(out_rel, cap, "%s", dir);
     return true;
 }
 

@@ -1,10 +1,7 @@
-// In-game overlay menu built with Dear ImGui (Metal renderer on macOS, Vulkan elsewhere; input fed from SDL events).
+// In-game overlay menu built with Dear ImGui + OpenGL 3.2+ (input queued from SDL3 events on main thread).
 //
 // Threads: SDL events arrive on the main thread and are queued; the menu is laid out and drawn on the
-// render thread inside backend_present, after the game image, into the same drawable.
-#ifdef __APPLE__
-#import <Metal/Metal.h>
-#endif
+// guest render thread inside gl_backend_swap_buffers(), after the game image, onto FBO 0.
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <pthread.h>
@@ -19,53 +16,28 @@
 #include "pad_nav.h"
 #include "ui_font.h"
 #include "ui_i18n.h"
-#ifdef __APPLE__
-#include "imgui_impl_metal.h"
-#else
-#include "imgui_impl_vulkan.h"
-extern "C" bool vk_imgui_backend_init(void);  // runtime/nvn/vulkan/imgui_glue.cpp
-extern "C" void vk_imgui_fonts_rebuild(void);
-// runtime/nvn/vulkan/device.c: the command buffer ImGui records into (a secondary one the recorder thread executes in
-// the window image's commands, or that buffer itself after the recorder caught up), then handed back
-extern "C" void *vk_overlay_begin(void *window_cmd);
-extern "C" void vk_overlay_end(void *window_cmd, void *cmd);
-#endif
 
 extern "C" {
 #include "../hle.h"
 #include "../settings.h"
+#include "../gl/gl_backend.h"
+#include "../gl/gl_imgui.h"
 #include "menu.h"
 void input_reset(void);
-void save_editor_draw(float scale);  // save_editor.mm
-extern "C" int game_in_play(void);  // hle/warp.c
-void save_editor_on_open(void);
-void rando_tab_draw(float scale);
-bool warp_tab_draw(float scale);  // warp_tab.mm: true when a warp started
-extern "C" void cheats_draw(float scale);  // cheats.mm
-extern "C" void difficulty_draw(float scale);  // difficulty.mm
 void controls_tab_draw(float scale);  // controls_ui.mm
 bool controls_ui_took_back(void);
-bool rando_tab_took_back(void);  // rando_tab.mm: B went back from the Triforce hunt's count
 #include "../input_bind.h"
 #include "../paths.h"
 #include "../platform.h"
 #include "../game_addresses.h"
-#include "../nvn/renderer.h"
-void ui_window_apply_pending(void);
-void ui_window_set_title(const char *title);
 }
 #include <time.h>
-
-static bool is_v13_ui(void) {
-    const GameVersion *v = game_version();
-    if (v) return strncmp(v->key, "v13_", 4) == 0;
-    return !plat_is_dir("extracted/romfs/region_common");
-}
 
 // ------------------------------------------------------------------ state shared with the main thread
 static std::atomic<bool> g_open{false};
 static std::atomic<bool> g_text_busy{false};  // a text field / the on-screen keyboard has the keys (render thread: ui_text_busy)
 static std::atomic<bool> g_want_fullscreen_apply{false};
+static std::atomic<int> g_want_title_lang{0};
 
 struct QEvent {
     enum { KEY, ANALOG, MOUSE_POS, MOUSE_BUTTON, WHEEL, TEXT } kind;
@@ -92,6 +64,19 @@ extern "C" void menu_test_open(void) {
     if (getenv("LARECOMP_MENU_TAB")) { extern int g_tab_request_ext; g_tab_request_ext = atoi(getenv("LARECOMP_MENU_TAB")); }
 }
 
+extern "C" void menu_set_open_for_test(bool open) {
+    if (open == g_open.load()) return;
+    g_open.store(open);
+    input_reset();
+    bind_capture_cancel();
+    if (!open) { osk_cancel(); g_text_busy = false; }
+}
+
+extern "C" void menu_set_tab_for_test(int tab_idx) {
+    extern int g_tab_request_ext;
+    g_tab_request_ext = tab_idx;
+}
+
 void menu_tabs_focus(bool first_tab);
 static void set_open(bool open) {
     if (open == g_open.load()) return;
@@ -99,8 +84,7 @@ static void set_open(bool open) {
     input_reset();  // nothing held while the menu had focus leaks into the game
     bind_capture_cancel();
     if (open) {
-        save_editor_on_open();
-        static bool opened;  // the controller's cursor: the first tab (Controls) the first time this session, later the
+        static bool opened;  // the controller's cursor: the first tab (Display) the first time this session, later the
         menu_tabs_focus(!opened);  // selected one
         opened = true;
     }
@@ -295,26 +279,27 @@ bool menu_handle_event(const SDL_Event *e) {
 extern "C" uint32_t g_window_resize_request;  // (test scripts: runtime/hle/input.c "resize")
 void menu_apply_window_requests(void *win) {
     SDL_Window *w = (SDL_Window *)win;
-    g_pixel_density = SDL_GetWindowPixelDensity(w);
+    if (w) g_pixel_density = SDL_GetWindowPixelDensity(w);
     static bool text_input;
     bool want_text = capturing();
-    if (want_text != text_input) {
+    if (w && want_text != text_input) {
         if (want_text) SDL_StartTextInput(w);
         else SDL_StopTextInput(w);
         text_input = want_text;
     }
-    if (g_want_fullscreen_apply.exchange(false)) {
-#ifdef __APPLE__
-        SDL_SetWindowFullscreen(w, g_settings.fullscreen);
-#else
-        ui_request_window_apply();
-#endif
+    int want_lang = g_want_title_lang.exchange(0, std::memory_order_acq_rel);
+    if (want_lang > 0) {
+        char wtitle[256];
+        snprintf(wtitle, sizeof wtitle, "YokaiWatch1Recomp — %s", ui_tr_lang(want_lang, STR_APP_TITLE));
+        gl_backend_window_set_title(wtitle);
     }
-#ifndef __APPLE__
-    ui_window_apply_pending();
-#endif
-    if (uint32_t r = __atomic_exchange_n(&g_window_resize_request, 0u, __ATOMIC_RELAXED))
-        SDL_SetWindowSize(w, (int)(r >> 16), (int)(r & 0xffff));
+    if (g_want_fullscreen_apply.exchange(false)) {
+        g_settings.fullscreen = (g_settings.window_mode != WIN_WINDOWED);
+        gl_backend_apply_window_settings();
+    }
+    if (uint32_t r = __atomic_exchange_n(&g_window_resize_request, 0u, __ATOMIC_RELAXED)) {
+        if (w) SDL_SetWindowSize(w, (int)(r >> 16), (int)(r & 0xffff));
+    }
 }
 
 // ------------------------------------------------------------------ render thread
@@ -340,32 +325,26 @@ void menu_tabs_focus(bool first_tab) {
 int g_tab_request_ext = -1;
 
 static void style_init(void) {
-    ui_apply_sentinel_theme(1.0f);
+    ui_apply_yw1_theme(1.0f);
 }
 
-static void ensure_fonts(float scale, bool allow_vk_rebuild) {
+static void ensure_fonts(float scale, bool allow_gl_rebuild) {
     float fsc = scale;
     if (fsc < 0.55f) fsc = 0.55f;
     if (fsc > 2.5f) fsc = 2.5f;
     int lang = ui_resolve_lang();
     if (g_built_font_scale > 0.0f && g_built_ui_lang == lang && fabsf(g_built_font_scale - fsc) <= 0.04f) return;
-    if (g_inited && !allow_vk_rebuild) return;
+    if (g_inited && !allow_gl_rebuild) return;
     ui_load_i18n_fonts(&g_font, &g_menu_font, &g_font_big, 28.0f * fsc, 32.0f * fsc, 42.0f * fsc, lang, nullptr, nullptr);
     g_menu_font_big = g_font_big;
     g_built_font_scale = fsc;
     g_built_ui_lang = lang;
     if (g_inited) {
-#ifndef __APPLE__
-        vk_imgui_fonts_rebuild();
-#endif
+        gl_imgui_fonts_rebuild();
     }
 }
 
-#ifdef __APPLE__
-static void init(id<MTLDevice> dev, float scale) {
-#else
 static void init(float scale) {
-#endif
     IMGUI_CHECKVERSION();
     g_ctx = ImGui::CreateContext();
     ImGui::SetCurrentContext(g_ctx);
@@ -376,11 +355,7 @@ static void init(float scale) {
     g_built_font_scale = -1.0f;
     ensure_fonts(scale, true);
     style_init();
-#ifdef __APPLE__
-    ImGui_ImplMetal_Init(dev);
-#else
-    vk_imgui_backend_init();
-#endif
+    gl_imgui_overlay_init();
     g_inited = true;
 }
 
@@ -401,160 +376,10 @@ static void drain_events(ImGuiIO &io) {
     }
 }
 
-extern "C" void renderer_get_scale(float *sx, float *sy);
 extern "C" int input_pad_family(void);  // runtime/hle/input.c
-extern "C" double output_scale_dynamic_factor(void);
+extern "C" void rt_request_reboot(int kind);  // runtime/main.c (RT_REBOOT_TITLE = 2: the start screen)
 
-static void tab_display(void) {
-    float scale = ImGui::GetFontSize() / 34;
-    opt_begin("##video", scale);
-    opt_section("Display");
-    const char *aspects[] = {"Unlocked", "Original 16:9"};
-    opt_choice("Aspect ratio", &g_settings.aspect, aspects, 2, ASPECT_UNLOCKED,
-               "Unlocked: the view fills the window, so wider (or taller) windows show more of the island - up to "
-               "ultrawide; houses and dungeons keep their framing. Original 16:9: the game's own framing, with bars.");
-    bool fs = g_settings.fullscreen;
-    if (opt_toggle("Fullscreen", &fs, false, "Fills the screen. Also: F11, Alt+Enter or Cmd+Ctrl+F.")) {
-        g_settings.fullscreen = fs;
-        g_settings.window_mode = fs ? WIN_BORDERLESS : WIN_WINDOWED;
-        g_want_fullscreen_apply.store(true);
-    }
-    if (opt_toggle("Show FPS", &g_settings.show_fps, false, "Shows the frame rate in the top right corner."))
-        g_settings.hud_mode = g_settings.show_fps ? HUD_FPS : HUD_OFF;
-
-    opt_section("Rendering");
-    // display order -> RES_* (the ini / enum order predates the menu order)
-    // (up to 4x: 7680 x 4320, 8K - more only ran out of GPU memory, and sat next to 75% in the list)
-    // (Match display in the middle: left from it 75% / 50% / 25%, right Dynamic then 1x-4x; user 2026-10-11)
-    static const char *res[] = {"25%", "50%", "75%", "Match display", "Dynamic", "1x", "2x", "3x", "4x"};
-    static const int res_mode[] = {RES_Q25, RES_Q50, RES_Q75, RES_MATCH, RES_DYNAMIC, 1, 2, 3, 4};
-    enum { RES_MATCH_AT = 3 };
-    enum { NRES = sizeof res_mode / sizeof res_mode[0] };
-    {
-        int ri = RES_MATCH_AT, rdef = RES_MATCH_AT;  // (rdef: the GPU's default - Dynamic on an integrated GPU)
-        for (int i = 0; i < NRES; i++) {
-            if (res_mode[i] == g_settings.res_mode) ri = i;
-            if (res_mode[i] == g_default_res_mode) rdef = i;
-        }
-        float sx, sy;
-        renderer_get_scale(&sx, &sy);
-        char d[400];
-        int n = snprintf(d, sizeof d, "How sharp the 3D image is. Match display: your screen's own resolution. Dynamic: "
-                                      "as sharp as your GPU keeps at full speed. 1x-4x: the Switch's 1080p times that%s. "
-                                      "75%% / 50%% / 25%%: a share of the display, for slower machines.\n\nRendering at "
-                                      "%.0f x %.0f.", g_gpu_integrated ? " (1x: 720p on this GPU)" : "", 1920.0 * sx, 1080.0 * sy);
-        if (g_settings.res_mode == RES_DYNAMIC)
-            snprintf(d + n, sizeof d - n, " Dynamic: %.0f%% of the display right now.", output_scale_dynamic_factor() * 100);
-        if (opt_choice("Internal resolution", &ri, res, NRES, rdef, d, false))
-            g_settings.res_mode = res_mode[ri], g_settings.res_auto = false;
-    }
-    {   // each OS's own upscaler next to bilinear (UPSCALE_SHARP: MetalFX on macOS, AMD FSR 1 on Windows)
-#ifdef __APPLE__
-        static const char *ups[] = {"Bilinear", "MetalFX"};
-        const char *ud = "How the image is scaled up to the window when it renders at a lower resolution. MetalFX: Apple's "
-                         "upscaler, sharper. Bilinear: plain and soft.";
-#else
-        static const char *ups[] = {"Bilinear", "AMD FSR 1"};
-        const char *ud = "How the image is scaled up to the window when it renders at a lower resolution. AMD FSR 1: "
-                         "edge-aware upscaling and sharpening, sharper. Bilinear: plain and soft.";
-#endif
-        int ui = g_settings.upscaler == UPSCALE_BILINEAR ? 0 : 1;
-        char udm[512];
-        if (g_settings.res_mode == RES_MATCH) {  // (renders at the window's size: nothing to scale up)
-            snprintf(udm, sizeof udm, "%s\n\nNot used at Match display: the game already renders at your display's resolution.", ud);
-            ud = udm;
-            opt_disable_next();
-        }
-        if (opt_choice("Upscaler", &ui, ups, 2, g_default_upscaler == UPSCALE_BILINEAR ? 0 : 1, ud))
-            g_settings.upscaler = ui ? UPSCALE_SHARP : UPSCALE_BILINEAR, g_settings.upscaler_auto = false;
-    }
-    static const char *aa[] = {"Off", "SMAA"};
-    opt_choice("Anti-aliasing", &g_settings.antialias, aa, 2, AA_OFF,
-               "Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and "
-               "blends only along them, so textures stay sharp. Most useful at a lower internal resolution.");
-
-    opt_section("Game");
-    opt_toggle("Remove blur", &g_settings.blur_removal, false,
-               "Turns off the tilt-shift blur at the top and bottom of the screen.");
-    opt_toggle("Hide Hero Mode icon", &g_settings.hide_hero_icon, false,
-               "Hides the Hero Mode emblem in the corner of the screen while playing a Hero Mode file.");
-    opt_end();
-}
-
-extern "C" bool cosmetics_seed_on(void);  // runtime/cosmetics_seed.c
-
-// Cosmetics: tunic / heart colours, live (runtime/nvn/texpatch.c), and recolours by draw (runtime/nvn/recolour*.c);
-// a seed made with "Random cosmetics" fills the rows left on Default (shown as "Seed: <colour>")
-static void tab_cosmetics(void) {
-    opt_begin("##cosmetics", ImGui::GetFontSize() / 34);
-    CosColour *rows[] = {&g_settings.tunic, &g_settings.hearts, &g_settings.hair, &g_settings.skin, &g_settings.shield,
-                         &g_settings.leaves, &g_settings.grass, &g_settings.sand};
-    if (opt_button("Randomize all", "Every color below gets a random color."))
-        for (CosColour *c : rows) c->pick = 1 + rand() % (COL_RANDOM - 1);  // (a named colour: shown as what it is)
-    if (opt_button("Default all", "Everything on this page back to the game's own look.")) {
-        for (CosColour *c : rows) c->pick = COL_DEFAULT;
-        g_settings.enemy_colours = 0;
-        g_settings.screen_filter = 0;
-    }
-    opt_section("Colors");
-    opt_colour("Tunic color", &g_settings.tunic, COL_SLOT_TUNIC,
-               "Link's tunic color. Default: the game's own (or the randomizer seed's).");
-    opt_colour("Heart color", &g_settings.hearts, COL_SLOT_HEARTS, "The color of the hearts on the HUD.");
-    opt_colour("Hair color", &g_settings.hair, COL_SLOT_HAIR, "Link's hair color.");
-    opt_colour("Body color", &g_settings.skin, COL_SLOT_SKIN, "Link's body color.");  // (larecomp.ini: skin)
-    opt_colour("Shield color", &g_settings.shield, COL_SLOT_SHIELD, "The color of Link's shield.");
-    opt_section("Overworld");
-    {   // Season: fills Leaves, Grass and Sand at once (palette: Orange 2, Gold 3, Pink 9, White 10); "Mixed" when
-        // they match none
-        static const char *const names[] = {"Spring", "Autumn", "Winter", "Cherry blossom", "Mixed"};
-        static const int preset[4][3] = {{COL_DEFAULT, COL_DEFAULT, COL_DEFAULT}, {2, 3, 3}, {10, 10, 10},
-                                         {9, COL_DEFAULT, COL_DEFAULT}};
-        int cur = 4;  // (as shown: a row on Default shows the seed's colour, if it has its own)
-        for (int i = 0; i < 4; i++)
-            if (col_pick(&g_settings.leaves, COL_SLOT_LEAVES) == preset[i][0] &&
-                col_pick(&g_settings.grass, COL_SLOT_GRASS) == preset[i][1] &&
-                col_pick(&g_settings.sand, COL_SLOT_SAND) == preset[i][2])
-                cur = i;
-        int v = cur;
-        if (opt_choice("Season", &v, names, 5, 0, "Sets the leaves, grass and sand colors below.") && v != cur) {
-            if (v == 4) v = cur == 0 ? 3 : 0;  // (Mixed is never chosen: past the ends, back round)
-            g_settings.leaves.pick = preset[v][0];
-            g_settings.grass.pick = preset[v][1];
-            g_settings.sand.pick = preset[v][2];
-        }
-    }
-    opt_colour("Leaves color", &g_settings.leaves, COL_SLOT_LEAVES, "The overworld's tree leaves and bushes.");
-    opt_colour("Grass color", &g_settings.grass, COL_SLOT_GRASS, "The overworld's grass.");
-    opt_colour("Sand color", &g_settings.sand, COL_SLOT_SAND, "The beaches, the desert and the sandy south.");
-    opt_section("Enemies");
-    {   // (Off in a seed with its own cosmetics: "Seed", its enemies are per seed)
-        const char *modes[N_ENEMY_COLOUR_MODES];
-        for (int i = 0; i < N_ENEMY_COLOUR_MODES; i++) modes[i] = g_enemy_colour_modes[i];
-        if (cosmetics_seed_on()) modes[0] = "Seed";
-        opt_choice("Enemy colors", &g_settings.enemy_colours, modes, N_ENEMY_COLOUR_MODES, 0,
-                   "Each kind of enemy in another color. Enemies whose color shows their strength or type keep theirs.");
-    }
-    opt_section("Screen");
-    opt_choice("Screen filter", &g_settings.screen_filter, g_screen_filters, N_SCREEN_FILTERS, 0,
-               "A filter over the whole picture, the HUD included.");
-    opt_end();
-}
-
-static void tab_audio(void) {
-    opt_begin("##audio", ImGui::GetFontSize() / 34);
-    opt_section("Sound");
-    float pct = roundf(g_settings.volume * 100);
-    if (opt_slider("Volume", &pct, 0, 200, 5, 100, "%g%%",
-                   "The game's volume. 100% is the game's own level; above it, louder."))
-        g_settings.volume = pct / 100.0f;
-    opt_toggle("Room reverb", &g_settings.reverb, true,
-               "The game's echo in caves, dungeons and big rooms.");
-    opt_toggle("Movie audio", &g_settings.movie_audio, true,
-               "Sound in the game's movies (the opening and the ending). Applies the next time a movie starts.");
-    opt_end();
-}
-
-static void tab_display_v13(float scale) {
+static void tab_display(float scale) {
     opt_begin("##video_v13", scale);
     opt_section(ui_tr(STR_SEC_DISPLAY_WIN));
     const char *win_modes[3] = {ui_tr(STR_WIN_WINDOWED), ui_tr(STR_WIN_BORDERLESS), ui_tr(STR_WIN_EXCLUSIVE)};
@@ -578,37 +403,8 @@ static void tab_display_v13(float scale) {
     const char *vsync_opts[3] = {ui_tr(STR_VSYNC_MAILBOX), ui_tr(STR_VSYNC_FIFO), ui_tr(STR_VSYNC_IMMEDIATE)};
     if (opt_choice(ui_tr(STR_OPT_VSYNC), &g_settings.vsync_mode, vsync_opts, 3, VSYNC_MAILBOX,
                    ui_tr(STR_OPT_VSYNC_DESC), false)) {
-        vk_request_swapchain_recreate();
+        ui_request_window_apply();
         settings_save();
-    }
-
-    opt_section(ui_tr(STR_SEC_RENDER_SCALE));
-    {
-        const char *scale_labels[3] = {ui_tr(STR_SCALE_1X), ui_tr(STR_SCALE_1_5X), ui_tr(STR_SCALE_2X)};
-        int si = g_settings.res_mode == 2 ? 2 : g_settings.res_mode == RES_1_5X ? 1 : 0;
-        float sx = 1.0f, sy = 1.0f;
-        renderer_get_scale(&sx, &sy);
-        char desc[384];
-        snprintf(desc, sizeof desc, ui_tr(STR_OPT_RENDER_SCALE_DESC_FMT), 1920.0 * sx, 1080.0 * sy);
-        if (opt_choice(ui_tr(STR_OPT_RENDER_SCALE), &si, scale_labels, 3, 0, desc, false)) {
-            g_settings.res_mode = (si == 2) ? 2 : (si == 1) ? RES_1_5X : 1;
-            g_settings.res_auto = false;
-            settings_save();
-        }
-    }
-    {
-#ifdef __APPLE__
-        const char *up_opts[2] = {ui_tr(STR_UPSCALE_BILINEAR), "MetalFX"};
-#else
-        const char *up_opts[2] = {ui_tr(STR_UPSCALE_BILINEAR), "AMD FSR 1"};
-#endif
-        int ui = g_settings.upscaler == UPSCALE_BILINEAR ? 0 : 1;
-        if (opt_choice(ui_tr(STR_OPT_UPSCALER), &ui, up_opts, 2, g_default_upscaler == UPSCALE_BILINEAR ? 0 : 1,
-                       ui_tr(STR_OPT_UPSCALER_DESC))) {
-            g_settings.upscaler = ui ? UPSCALE_SHARP : UPSCALE_BILINEAR;
-            g_settings.upscaler_auto = false;
-            settings_save();
-        }
     }
 
     opt_section(ui_tr(STR_SEC_MONITOR_PACE));
@@ -632,7 +428,7 @@ static void tab_display_v13(float scale) {
     opt_end();
 }
 
-static void tab_audio_v13(float scale) {
+static void tab_audio(float scale) {
     opt_begin("##audio_v13", scale);
     opt_section(ui_tr(STR_SEC_AUDIO_OUT));
     float pct = roundf(g_settings.volume * 100.0f);
@@ -653,26 +449,12 @@ static void tab_audio_v13(float scale) {
     opt_end();
 }
 
-static void tab_advanced_v13(float scale, bool in_game) {
-    static bool show_vk_adv = false;
-    static uint64_t cache_bytes = 0;
-    static bool cache_measured = false;
-    static char cache_msg[160];
+static void tab_system(float scale, bool in_game) {
     static char save_msg[256];
     static bool game_lang_saved_notice = false;
     static int ask = 0;  // 0: idle, 1: confirm return to launcher, 2: confirm quit
-    if (!cache_measured) {
-        cache_bytes = rt_tree_size("cache");
-        cache_measured = true;
-    }
     if (ask && (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
         ask = 0;
-
-    char cache_sz[48];
-    if (cache_bytes >= (1024ull * 1024ull))
-        snprintf(cache_sz, sizeof cache_sz, "%.1f MB", cache_bytes / (1024.0 * 1024.0));
-    else
-        snprintf(cache_sz, sizeof cache_sz, "%llu KB", (unsigned long long)(cache_bytes / 1024ull));
 
     bool sv_exists = false;
     uint64_t sv_size = 0;
@@ -703,7 +485,6 @@ static void tab_advanced_v13(float scale, bool in_game) {
         const char *const *ui_lbls = ui_lang_selector_labels(&ui_n);
         if (opt_choice_id("opt_ui_lang", ui_tr(STR_UI_LANG_LABEL), &g_settings.ui_lang, ui_lbls, ui_n, UI_LANG_AUTO,
                           ui_tr(STR_UI_LANG_DESC), true)) {
-            cache_msg[0] = 0;
             save_msg[0] = 0;
             settings_save();
         }
@@ -716,30 +497,6 @@ static void tab_advanced_v13(float scale, bool in_game) {
                        gdesc.c_str(), true)) {
             if (in_game) game_lang_saved_notice = true;
             settings_save();
-        }
-    }
-
-    opt_section(ui_tr(STR_SEC_VK_SYNC));
-    opt_toggle(ui_tr(STR_OPT_VK_EXPAND), &show_vk_adv, false, ui_tr(STR_OPT_VK_EXPAND_DESC));
-    if (show_vk_adv) {
-        opt_indent(1);
-        if (opt_toggle(ui_tr(STR_OPT_VK_WAIT_PIPES), &g_settings.vk_wait_pipes, true, ui_tr(STR_OPT_VK_WAIT_PIPES_DESC)))
-            settings_save();
-        if (opt_toggle(ui_tr(STR_OPT_VK_COPY_VERTS), &g_settings.vk_copy_vertices, true, ui_tr(STR_OPT_VK_COPY_VERTS_DESC)))
-            settings_save();
-        if (opt_toggle(ui_tr(STR_OPT_VK_OVERLAP), &g_settings.vk_gpu_overlap, true, ui_tr(STR_OPT_VK_OVERLAP_DESC)))
-            settings_save();
-        opt_indent(-1);
-    }
-
-    opt_section(ui_tr(STR_SEC_SHADER_CACHE));
-    {
-        std::string desc = ui_tr(STR_OPT_CLEAR_CACHE_DESC);
-        if (cache_msg[0]) desc += std::string("\n\n") + cache_msg;
-        if (opt_action(ui_tr(STR_OPT_CLEAR_CACHE), cache_sz, desc.c_str(), false, cache_msg[0] != 0)) {
-            int rm = vk_clear_shader_cache();
-            cache_bytes = rt_tree_size("cache");
-            snprintf(cache_msg, sizeof cache_msg, ui_tr(STR_CACHE_CLEARED_FMT), rm);
         }
     }
 
@@ -799,55 +556,6 @@ static void tab_advanced_v13(float scale, bool in_game) {
     }
     opt_end();
 }
-
-// Quit: back to the start screen (in game: the game reboots to it) or out to the desktop. Each asks first (progress
-// since the last save is lost); B / Esc or Cancel backs out.
-extern "C" void rt_request_reboot(int kind);  // runtime/main.c (RT_REBOOT_TITLE = 2: the start screen)
-static void tab_quit(float scale, bool in_game) {
-    static int ask;  // 0: the two choices; 1: start screen?; 2: desktop?
-    if (ask && (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
-        ask = 0;
-    const char *lost = in_game ? "\n\nProgress since your last save is lost." : "";
-    char d1[200], d2[200];
-    snprintf(d1, sizeof d1, "Leaves the game and goes back to the 13SentinelsRecomp start screen.%s", lost);
-    snprintf(d2, sizeof d2, "Closes 13SentinelsRecomp.%s", lost);
-    opt_begin("##quit", scale);
-    opt_section("Quit");
-    if (!ask) {
-        if (!in_game) opt_disable_next();  // (already on it)
-        if (opt_action("Quit to Start Screen", "", in_game ? d1 : "You're on the start screen.")) ask = 1;
-        if (opt_action("Quit to Desktop", "", d2)) ask = 2;
-    } else {
-        if (opt_action(ask == 1 ? "Yes, quit to Start Screen" : "Yes, quit to Desktop", "", ask == 1 ? d1 : d2)) {
-            settings_save();
-            if (ask == 1) {
-                rt_request_reboot(2);
-                set_open(false);
-            } else {
-                SDL_Event q = {};
-                q.type = SDL_EVENT_QUIT;
-                SDL_PushEvent(&q);
-            }
-            ask = 0;
-        }
-        if (opt_action("Cancel", "", "Stays where you are.")) ask = 0;
-    }
-    opt_end();
-}
-
-extern "C" bool inventory_overlay_wanted(void);
-extern "C" bool tracker_overlay_wanted(void);
-extern "C" bool tracker_dungeon_wanted(void);
-extern "C" void tracker_dungeon_draw(ImVec2 display, ImFont *font);
-extern "C" void tracker_overlay_draw(ImVec2 display, ImFont *font);
-extern "C" bool chaos_overlay_wanted(void);
-extern "C" void chaos_overlay_draw(ImVec2 display, ImFont *font);
-extern "C" void inventory_overlay_draw(ImVec2 display, ImFont *font);
-extern "C" bool race_overlay_wanted(void);
-extern "C" void race_overlay_draw(ImVec2 display, ImFont *font, float scale);
-extern "C" bool pickup_flyin_wanted(void);  // (silent pickups: pickup_flyin.mm)
-extern "C" void pickup_flyin_draw(ImVec2 display, ImFont *font, float scale);
-extern "C" bool race_overlay_key(char *out, size_t cap);
 
 // ---- reusing the overlay's last drawing (LARECOMP_OVERLAY_CACHE=0: off, a new ImGui frame every present as before)
 // While only the FPS counter and / or the run timer are up (no menu, no input, nothing interactive or animated), the
@@ -919,7 +627,6 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
 // Game thread (runtime/hle/swkbd.c): show the dialog, re-present the last frame until it's answered.
 // Returns 1 confirmed (out = text, UTF-8), 0 cancelled.
 extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, int cap) {
-    extern void backend_represent(void);
     snprintf(g_kbd_text, sizeof g_kbd_text, "%s", initial ? initial : "");
     g_kbd_max = max_len > 0 && max_len < (int)sizeof g_kbd_text / 4 ? max_len : 8;
     input_reset();
@@ -928,7 +635,14 @@ extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, in
     if (getenv("LARECOMP_KBD_AUTO")) { snprintf(g_kbd_text, sizeof g_kbd_text, "%s", getenv("LARECOMP_KBD_AUTO")); g_kbd = 2; }
     while (g_kbd.load() == 1 && !g_rt_unwind) {  // ~60 Hz (a reboot cancels)
         uint64_t t0 = SDL_GetTicks();
-        backend_represent();
+        if (SDL_GL_GetCurrentContext()) {
+            int ww = 1280, wh = 720, pw = 1280, ph = 720;
+            float dens = 1.0f;
+            gl_backend_get_cached_metrics(&ww, &wh, &pw, &ph, &dens);
+            gl_hle_blit_virtual_fbo(pw, ph);
+            gl_imgui_render_in_game_overlay(gl_backend_present_count(), ww, wh, pw, ph, dens);
+            if (SDL_Window *w = gl_backend_window()) SDL_GL_SwapWindow(w);
+        }
         uint64_t dt = SDL_GetTicks() - t0;
         if (dt < 16) SDL_Delay((uint32_t)(16 - dt));
     }
@@ -985,22 +699,13 @@ static void focus_check(bool down, bool up, bool any_down, int focused_tab, int 
 static void tabs_body(float scale, bool in_game, void (*prelaunch)(float)) {
     // (id: the page; -1 = Prelaunch)
     struct Tab { const char *name; int id; bool on; };
-    Tab tabs[11];
+    Tab tabs[4];
     int ntabs = 0;
-    const bool v13 = is_v13_ui();
-    if (v13) {
-        tabs[ntabs++] = {ui_tr(STR_TAB_DISPLAY), 0, true};
-        tabs[ntabs++] = {ui_tr(STR_TAB_AUDIO), 1, true};
-        tabs[ntabs++] = {ui_tr(STR_TAB_CONTROLS), 8, true};
-        tabs[ntabs++] = {ui_tr(STR_TAB_SYSTEM), 9, true};
-    } else {
-        if (prelaunch) tabs[ntabs++] = {"Prelaunch", -1, true};
-        static const char *names[] = {"Video", "Audio", "Save Editor", "Randomizer", "Warp", "Cheats", "Gameplay",
-                                      "Cosmetics", "Controls", "Quit"};
-        static const int order[] = {8, 0, 1, 6, 7, 3, 5, 4, 2, 9};
-        for (int i : order)
-            if (i != 9 || !prelaunch) tabs[ntabs++] = {names[i], i, in_game || (i != 2 && i != 4 && i != 5)};
-    }
+    tabs[ntabs++] = {ui_tr(STR_TAB_DISPLAY), 0, true};
+    tabs[ntabs++] = {ui_tr(STR_TAB_AUDIO), 1, true};
+    tabs[ntabs++] = {ui_tr(STR_TAB_CONTROLS), 8, true};
+    tabs[ntabs++] = {ui_tr(STR_TAB_SYSTEM), 9, true};
+    (void)prelaunch;
     int cur = 0;  // g_tab / g_tab_request hold ids
     for (int i = 0; i < ntabs; i++) if (tabs[i].id == g_tab) cur = i;
     if (!tabs[cur].on) cur = 0;
@@ -1068,7 +773,7 @@ static void tabs_body(float scale, bool in_game, void (*prelaunch)(float)) {
                 ImGui::PushStyleColor(ImGuiCol_Tab, ImVec4(0.16f, 0.36f, 0.48f, 1));
                 ImGui::PushStyleColor(ImGuiCol_TabHovered, ImVec4(0.16f, 0.36f, 0.48f, 1));
             }
-            if (g_focus_tab == -1 && !prelaunch) g_focus_tab = (g_tab_request >= 0) ? g_tab_request : (v13 ? tabs[0].id : 8);
+            if (g_focus_tab == -1 && !prelaunch) g_focus_tab = (g_tab_request >= 0) ? g_tab_request : tabs[0].id;
             bool focus_here = g_focus_tab == t.id || (g_focus_tab == -100 && t.id == g_tab);
             bool open = ImGui::BeginTabItem(lbl, NULL, f);
             ImGui::PopStyleColor(lit ? 3 : 1);
@@ -1100,20 +805,10 @@ static void tabs_body(float scale, bool in_game, void (*prelaunch)(float)) {
                     ImGui::SetNavCursorVisible(true);
                 }
                 switch (t.id) {
-                case -1: if (prelaunch) prelaunch(scale); break;
-                case 0: v13 ? tab_display_v13(scale) : tab_display(); break;
-                case 1: v13 ? tab_audio_v13(scale) : tab_audio(); break;
-                case 2:
-                    if (game_in_play()) save_editor_draw(scale);
-                    else ImGui::TextDisabled("Load a save file and get into the game to edit it.");
-                    break;
-                case 3: rando_tab_draw(scale); break;
-                case 4: if (warp_tab_draw(scale)) set_open(false); break;
-                case 5: cheats_draw(scale); break;
-                case 6: difficulty_draw(scale); break;
-                case 7: tab_cosmetics(); break;
+                case 0: tab_display(scale); break;
+                case 1: tab_audio(scale); break;
                 case 8: controls_tab_draw(scale); break;
-                case 9: v13 ? tab_advanced_v13(scale, in_game) : tab_quit(scale, in_game); break;
+                case 9: tab_system(scale, in_game); break;
                 }
                 static const char *scroll_test = getenv("LARECOMP_MENU_SCROLL");  // test hook: page scroll, 0..1
                 if (scroll_test) ImGui::SetScrollY(ImGui::GetScrollMaxY() * (float)atof(scroll_test));
@@ -1274,71 +969,54 @@ static void vpad_draw(float scale) {
 
 // Whether menu_render draws anything: the menu, the keyboard, an overlay (FPS, inventory, tracker, chaos, race, a
 // pickup card) or the on-screen pad.
-static bool render_needed(bool open, bool kbd, bool inv, bool trk, bool trkd, bool chaos, bool race, bool flyin) {
-    return open || kbd || g_settings.hud_mode != HUD_OFF || g_settings.show_fps || rt_speed_mult() > 1 ||
-           inv || trk || trkd || chaos || race || flyin || vpad_on();
+static bool render_needed(bool open, bool kbd) {
+    return open || kbd || g_settings.hud_mode != HUD_OFF || g_settings.show_fps || rt_speed_mult() > 1 || vpad_on();
 }
 
-#ifndef __APPLE__
-extern "C" void menu_prepare_frame(uint32_t target_h, bool loading) {
+extern "C" bool menu_prepare_frame(uint32_t target_h, bool loading) {
     if (!loading) {
         bool open = g_open.load();
-        bool inv = !open && inventory_overlay_wanted();
-        bool trk = !open && tracker_overlay_wanted();
-        bool trkd = !open && tracker_dungeon_wanted();
-        bool chaos = !open && chaos_overlay_wanted();
         bool kbd = g_kbd.load() == 1;
-        bool race = race_overlay_wanted();
-        bool flyin = pickup_flyin_wanted() && !open;
-        if (!render_needed(open, kbd, inv, trk, trkd, chaos, race, flyin)) return;
+        if (!render_needed(open, kbd)) {
+            if (g_inited) { pthread_mutex_lock(&q_lock); q_events.clear(); pthread_mutex_unlock(&q_lock); }
+            g_ov_same = 0;
+            return false;
+        }
     }
     float th = target_h > 0 ? (float)target_h : 1080.0f;
     float scale = th / 1080.0f;
     if (scale < 0.45f) scale = 0.45f;
     if (!g_inited) init(scale);
     ImGui::SetCurrentContext(g_ctx);
+    if (!ImGui::GetIO().BackendRendererUserData) gl_imgui_overlay_init();
     ensure_fonts(scale, true);
+    return true;
 }
-#endif
 
-#ifdef __APPLE__
-void menu_render(id<MTLDevice> dev, id<MTLCommandBuffer> cb, id<MTLTexture> target) {
-    const double tw = target.width, th = target.height;
-#else
-void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
-    const double tw = target_w, th = target_h;
-#endif
+void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_density) {
+    (void)win_w; (void)win_h;
+    if (pixel_density > 0.1f) g_pixel_density = pixel_density;
+    const double tw = pix_w > 0 ? pix_w : 1280.0, th = pix_h > 0 ? pix_h : 720.0;
     bool open = g_open.load();
-    bool v13 = is_v13_ui();
-    bool inv = !open && !v13 && inventory_overlay_wanted();
-    bool trk = !open && !v13 && tracker_overlay_wanted();
-    bool trkd = !open && !v13 && tracker_dungeon_wanted();
-    bool chaos = !open && !v13 && chaos_overlay_wanted();
-    bool kbd = !v13 && g_kbd.load() == 1;
-    bool race = !v13 && race_overlay_wanted();  // (run timer, race seed hash: race_overlay.mm)
-    bool flyin = !v13 && pickup_flyin_wanted() && !open;  // (a silent pickup's card)
+    bool kbd = g_kbd.load() == 1;
+    bool loading = gl_backend_is_loading();
     static int s_win_title_lang = -1;
     int cur_ui_lang = ui_resolve_lang();
-    if (v13 && s_win_title_lang != cur_ui_lang) {
+    if (s_win_title_lang != cur_ui_lang) {
         s_win_title_lang = cur_ui_lang;
-        char wtitle[256];
-        snprintf(wtitle, sizeof wtitle, "13SentinelsRecomp — %s", ui_tr_lang(cur_ui_lang, STR_APP_TITLE));
-        ui_window_set_title(wtitle);
+        g_want_title_lang.store(cur_ui_lang, std::memory_order_release);
     }
-    if (!render_needed(open, kbd, inv, trk, trkd, chaos, race, flyin)) {
+    if (!loading && !render_needed(open, kbd)) {
         if (g_inited) { pthread_mutex_lock(&q_lock); q_events.clear(); pthread_mutex_unlock(&q_lock); }
-        g_ov_same = 0;  // (shown again: built afresh first)
+        g_ov_same = 0;
         return;
     }
     float scale = (float)(th / 1080.0);
     if (scale < 0.45f) scale = 0.45f;
-#ifdef __APPLE__
-    if (!g_inited) init(dev, scale);
-#else
     if (!g_inited) init(scale);
-#endif
     ImGui::SetCurrentContext(g_ctx);
-    ensure_fonts(scale, false);
+    if (!ImGui::GetIO().BackendRendererUserData) gl_imgui_overlay_init();
+    ensure_fonts(scale, true);
     ImGuiIO &io = ImGui::GetIO();
     io.DisplaySize = ImVec2((float)tw, (float)th);
     io.DisplayFramebufferScale = ImVec2(1, 1);
@@ -1348,56 +1026,29 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     io.DeltaTime = last > 0 && now > last ? (float)(now - last) : 1.0f / 60;
     last = now;
     if (g_ov_cache < 0) g_ov_cache = !getenv("LARECOMP_OVERLAY_CACHE") || atoi(getenv("LARECOMP_OVERLAY_CACHE")) != 0;
-    if (vpad_on()) g_ov_cache = 0;  // (the pad follows the mouse: its draw data can't be reused from a cached frame)
-    RendererHudStats hud = {};
+    if (vpad_on()) g_ov_cache = 0;
     int hud_mode = g_settings.hud_mode != HUD_OFF ? g_settings.hud_mode : (g_settings.show_fps ? HUD_FPS : HUD_OFF);
     uint64_t spd_mult = rt_speed_mult();
-    if (hud_mode != HUD_OFF) renderer_get_hud_stats(&hud);
-    char key[sizeof g_ov_key];
-    key[0] = 0;
-    if (g_ov_cache) {
-        fps_note(now, io.DeltaTime);
-        char rk[64];
-        // (only the HUD and speed pill; input only reaches ImGui while the menu or the name entry is up)
-        if (!open && !kbd && !inv && !trk && !trkd && !chaos && !flyin && race_overlay_key(rk, sizeof rk)) {
-            pthread_mutex_lock(&q_lock);
-            bool events = !q_events.empty();
-            pthread_mutex_unlock(&q_lock);
-            if (!events) snprintf(key, sizeof key, "%.0fx%.0f hud %d %u spd %llu l%d | %s", tw, th, hud_mode,
-                                  hud_mode != HUD_OFF ? hud.seq : 0u, (unsigned long long)spd_mult, ui_resolve_lang(), rk);
-        }
-        ImDrawData *dd = ImGui::GetDrawData();
-        if (key[0] && g_ov_same >= 3 && !strcmp(key, g_ov_key) && dd && dd->Valid) {
-            g_text_busy = false;  // (the menu is closed)
-#ifdef __APPLE__
-            MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-            rp.colorAttachments[0].texture = target;
-            rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
-            rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-            ImGui_ImplMetal_NewFrame(rp);  // (the backend's target description only)
-            id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
-            ImGui_ImplMetal_RenderDrawData(dd, cb, enc);
-            [enc endEncoding];
-#else
-            void *oc = vk_overlay_begin(cmd);  // (as below)
-            ImGui_ImplVulkan_RenderDrawData(dd, (VkCommandBuffer)oc);
-            vk_overlay_end(cmd, oc);
-#endif
-            return;
-        }
-        if (key[0] && !strcmp(key, g_ov_key)) g_ov_same++;
-        else { memcpy(g_ov_key, key, sizeof key); g_ov_same = key[0] ? 1 : 0; }
+    if (g_ov_cache) fps_note(now, io.DeltaTime);
+
+    uint64_t total_draws = 0, gl_errs = 0;
+    int sh_ok = 0, sh_fail = 0;
+    static uint64_t prev_draws = 0;
+    static uint32_t frame_draws = 0;
+    static float max_ms = 0.0f;
+    static double max_ms_reset_t = 0.0;
+    gl_hle_get_stats(&total_draws, &gl_errs, &sh_ok, &sh_fail);
+    if (total_draws >= prev_draws) frame_draws = (uint32_t)(total_draws - prev_draws);
+    prev_draws = total_draws;
+    float cur_ms = io.DeltaTime * 1000.0f;
+    if (now - max_ms_reset_t > 2.0 || cur_ms > max_ms) {
+        if (now - max_ms_reset_t > 2.0) { max_ms = cur_ms; max_ms_reset_t = now; }
+        else max_ms = cur_ms;
     }
+
     drain_events(io);
     io.FontGlobalScale = 1.0f;
 
-#ifdef __APPLE__
-    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-    rp.colorAttachments[0].texture = target;
-    rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
-    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-#endif
-    // spacing/rounding follow the output size too (style tuned for 1080 p)
     static ImGuiStyle base;
     static float style_scale = -1;
     if (style_scale < 0) base = ImGui::GetStyle();
@@ -1406,32 +1057,37 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
         ImGui::GetStyle().ScaleAllSizes(scale);
         style_scale = scale;
     }
-#ifdef __APPLE__
-    ImGui_ImplMetal_NewFrame(rp);
-#else
-    ImGui_ImplVulkan_NewFrame();
-#endif
+
+    gl_imgui_overlay_new_frame();
     ImGui::NewFrame();
 
-    if (hud_mode != HUD_OFF) {
+    if (loading) {
+        static double load_t0 = -1.0;
+        if (load_t0 < 0.0) load_t0 = now;
+        ui_draw_loading_visual(now - load_t0, 3, ui_tr(STR_LOAD_STAGE_3), scale, g_menu_font_big, g_menu_font);
+    }
+
+    if (!loading && hud_mode != HUD_OFF) {
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 16 * scale, 16 * scale), 0, ImVec2(1, 0));
         ImGui::SetNextWindowBgAlpha(0.55f);
         ImGui::Begin("##fps", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                         ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
-        double dfps = hud.fps > 0 ? hud.fps : (g_ov_cache ? g_fps_shown : io.Framerate);
+        double dfps = (g_ov_cache && g_fps_shown > 0) ? g_fps_shown : io.Framerate;
         if (hud_mode == HUD_FPS) {
             ImGui::Text("%.0f FPS", dfps);
         } else {
-            double avg_ms = hud.frame_avg_ms > 0 ? hud.frame_avg_ms : (dfps > 0 ? 1000.0 / dfps : 0.0);
+            double avg_ms = dfps > 0 ? 1000.0 / dfps : cur_ms;
+            const char *ven = nullptr, *ren = nullptr, *ver = nullptr;
+            gl_hle_get_renderer_strings(&ven, &ren, &ver);
             ImGui::Text("FPS: %.1f", dfps);
-            ImGui::Text(ui_tr(STR_HUD_FTIME_FMT), avg_ms, hud.frame_max_ms);
-            ImGui::Text(ui_tr(STR_HUD_DRAWS_FMT), (unsigned long long)hud.draws);
-            ImGui::Text(ui_tr(STR_HUD_WAIT_FMT), hud.wait_ms);
+            ImGui::Text(ui_tr(STR_HUD_FTIME_FMT), avg_ms, (double)max_ms);
+            ImGui::Text(ui_tr(STR_HUD_DRAWS_FMT), (unsigned long long)frame_draws);
+            ImGui::Text("OpenGL 4.5 · %s (GL err: %llu)", ren ? ren : "GPU", (unsigned long long)gl_errs);
         }
         ImGui::End();
     }
 
-    if (spd_mult > 1) {
+    if (!loading && spd_mult > 1) {
         ImGui::SetNextWindowPos(ImVec2(16 * scale, 16 * scale), 0, ImVec2(0, 0));
         ImGui::SetNextWindowBgAlpha(0.6f);
         ImGui::Begin("##speed", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -1440,42 +1096,26 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
         ImGui::End();
     }
 
-    if (race) race_overlay_draw(io.DisplaySize, g_menu_font_big, scale);
-    if (flyin) pickup_flyin_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont(), scale);
-    if (trk) tracker_overlay_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont());
-    if (chaos) chaos_overlay_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont());
-    if (trkd) tracker_dungeon_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont());
-    if (inv) {
-        inventory_overlay_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont());
-    }
-
-    if (open) {
+    if (!loading && open) {
         // dim the game behind the menu
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 110));
-        float w = fminf(io.DisplaySize.x * 0.9f, 1500 * scale), h = io.DisplaySize.y - 2 * 18 * scale;  // (all the height: a slim margin)
+        float w = fminf(io.DisplaySize.x * 0.9f, 1500 * scale), h = io.DisplaySize.y - 2 * 18 * scale;
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
         ImGui::Begin("##menu", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
-        ImFont *keep_big = g_font_big;  // (the window in the menu's font; header() uses g_font_big)
+        ImFont *keep_big = g_font_big;
         g_font_big = g_menu_font_big;
         ImGui::PushFont(g_menu_font);
-        // header as on the start screen's Settings: the title, and a close X in the corner (B / Esc too). ("Title
-        // screen" - rt_request_reboot(RT_REBOOT_TITLE) - is to find a new home; user 2026-10-11.)
-        const bool v13 = is_v13_ui();
         ImGui::PushFont(g_font_big);
-        ImGui::TextColored(ImVec4(0.95f, 0.79f, 0.36f, 1), "%s", v13 ? ui_tr(STR_SYS_SETTINGS_TITLE) : "Settings");
+        ImGui::TextColored(ImVec4(0.95f, 0.79f, 0.36f, 1), "%s", ui_tr(STR_SYS_SETTINGS_TITLE));
         ImGui::PopFont();
         {
             float bx = 44 * scale;
-            if (v13) {
-                const char *close_lbl = ui_tr(STR_BTN_CLOSE_MENU);
-                float cbw = fmaxf(136 * scale, ImGui::CalcTextSize(close_lbl).x + 32 * scale);
-                ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx - cbw - 14 * scale);
-                if (ImGui::Button(close_lbl, ImVec2(cbw, bx))) set_open(false);
-                ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx);
-            } else {
-                ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx);
-            }
+            const char *close_lbl = ui_tr(STR_BTN_CLOSE_MENU);
+            float cbw = fmaxf(136 * scale, ImGui::CalcTextSize(close_lbl).x + 32 * scale);
+            ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx - cbw - 14 * scale);
+            if (ImGui::Button(close_lbl, ImVec2(cbw, bx))) set_open(false);
+            ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx);
             ImVec2 p = ImGui::GetCursorScreenPos();
             ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
             bool close = ImGui::InvisibleButton("##close", ImVec2(bx, bx), ImGuiButtonFlags_EnableNav);
@@ -1492,76 +1132,27 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
         bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId), typing = ui_text_busy();
         bool capturing_bind = bind_capture_active(NULL, NULL, NULL);
-        if (v13) {
-            float foot_h = 36.0f * scale;
-            ImGui::BeginChild("##menu_tabs_wrap", ImVec2(0, -foot_h), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
-            tabs_body(scale, true, NULL);
-            ImGui::EndChild();
-            ImGui::Separator();
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextColored(ImVec4(0.58f, 0.78f, 0.88f, 0.95f), ui_tr(STR_HINT_BAR_FMT),
-                               ui_pad_confirm_label(), ui_pad_back_label());
-        } else {
-            tabs_body(scale, true, NULL);
-        }
-        if (!any_popup && !typing && !capturing_bind && !ui_text_busy() && !controls_ui_took_back() && !rando_tab_took_back() &&
+        float foot_h = 36.0f * scale;
+        ImGui::BeginChild("##menu_tabs_wrap", ImVec2(0, -foot_h), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
+        tabs_body(scale, true, NULL);
+        ImGui::EndChild();
+        ImGui::Separator();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(ImVec4(0.58f, 0.78f, 0.88f, 0.95f), ui_tr(STR_HINT_BAR_FMT),
+                           ui_pad_confirm_label(), ui_pad_back_label());
+        if (!any_popup && !typing && !capturing_bind && !ui_text_busy() && !controls_ui_took_back() &&
             ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
             (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
             set_open(false);
         ImGui::PopFont();
         g_font_big = keep_big;
         ImGui::End();
-        osk_draw(g_font_big, scale);  // (a text field activated with the controller)
+        osk_draw(g_font_big, scale);
     }
 
-    if (kbd) keyboard_draw(io, scale);
-    if (!open) vpad_draw(scale);  // (the on-screen pad: no gamepad needed; hidden while the menu is up)
+    if (!loading && kbd) keyboard_draw(io, scale);
+    if (!loading && !open) vpad_draw(scale);
     ImGui::Render();
     g_text_busy = open && ui_text_busy();
-#ifdef __APPLE__
-    id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
-    ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cb, enc);
-    [enc endEncoding];
-#else
-    // ImGui records its commands itself. Not into cmd, the window image's command buffer, while the recorder thread
-    // (record.c) may still be recording it (one thread at a time on a command buffer and its pool: f054d8b, the device
-    // loss entering Mabe Village), and without waiting for the recorder to catch up every frame either (a full drain:
-    // 20-30 ms a frame on the Steam Deck): into a secondary command buffer of device.c's, which the recorder executes
-    // in cmd in order - after the uploads queued above (overlay icons). Decided right here, where the draw data is
-    // final, so an overlay turning on during this function can't miss it. (Recorder off: into cmd directly.)
-    void *oc = vk_overlay_begin(cmd);
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), (VkCommandBuffer)oc);  // inside the window image's rendering
-    vk_overlay_end(cmd, oc);
-#endif
+    gl_imgui_overlay_render_draw_data(ImGui::GetDrawData(), (int)tw, (int)th, gl_backend_present_count());
 }
-
-#ifndef __APPLE__
-extern "C" void menu_render_loading(void *cmd, uint32_t target_w, uint32_t target_h, int stage) {
-    const double tw = target_w, th = target_h;
-    float scale = (float)(th / 1080.0);
-    if (scale < 0.45f) scale = 0.45f;
-    if (!g_inited) init(scale);
-    ImGui::SetCurrentContext(g_ctx);
-    ensure_fonts(scale, false);
-    ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize = ImVec2((float)tw, (float)th);
-    io.DisplayFramebufferScale = ImVec2(1, 1);
-    io.FontGlobalScale = 1.0f;
-    drain_events(io);
-
-    static double t0 = -1.0, last = -1.0;
-    double now = SDL_GetTicks() / 1000.0;
-    if (t0 < 0.0) t0 = now;
-    io.DeltaTime = (last > 0.0 && now > last) ? (float)(now - last) : (1.0f / 60.0f);
-    last = now;
-
-    ImGui_ImplVulkan_NewFrame();
-    ImGui::NewFrame();
-    ui_draw_loading_visual(now - t0, stage, nullptr, scale, g_menu_font_big, g_menu_font);
-    ImGui::Render();
-
-    void *oc = vk_overlay_begin(cmd);
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), (VkCommandBuffer)oc);
-    vk_overlay_end(cmd, oc);
-}
-#endif

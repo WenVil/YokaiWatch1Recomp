@@ -36,7 +36,7 @@ cp $Z/lib/std/std.zig $O/lib/std/
 
 # 2. the runtime: a probe DLL importing from the exe, linked the way the full zig does it (-v: its lld-link line);
 #    -s: the runtime is built without debug info (it would name this machine's folders)
-printf 'LIBRARY 13SentinelsRecomp.exe\nEXPORTS\nprobe_host\n' > $W/host.def
+printf 'LIBRARY YokaiWatch1Recomp.exe\nEXPORTS\nprobe_host\n' > $W/host.def
 printf 'void probe_host(void);\n__declspec(dllexport) void probe(void) { probe_host(); }\n' > $W/dll.c
 ZA=$PWD/$Z/zig.exe
 (cd $W && $ZA dlltool -d host.def -l host.a -m i386:x86-64 && $ZA cc "${flags[@]}" -c dll.c -o dll.o &&

@@ -1,6 +1,6 @@
-// Windows dev compatibility shim (build/lasrecomp.exe -> sibling build/13SentinelsRecomp.exe).
-// Keeps existing unmodified test scripts (e.g. work/run_regression_suite.ps1 invoking lasrecomp.exe) working
-// while routing all imports to 13SentinelsRecomp.exe and cleaning up child processes via a Windows Job Object.
+// Windows dev compatibility shim (build/lasrecomp.exe -> sibling build/YokaiWatch1Recomp.exe).
+// Keeps existing helper scripts working while routing invocations to YokaiWatch1Recomp.exe
+// and cleaning up child processes via a Windows Job Object.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
@@ -33,7 +33,7 @@ int wmain(int argc, wchar_t **argv) {
     slash[1] = 0;
 
     wchar_t target[MAX_PATH];
-    if (_snwprintf(target, MAX_PATH, L"%s13SentinelsRecomp.exe", exe_dir) < 0) return 127;
+    if (_snwprintf(target, MAX_PATH, L"%sYokaiWatch1Recomp.exe", exe_dir) < 0) return 127;
 
     static wchar_t cmd[32768];
     cmd[0] = 0;

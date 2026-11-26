@@ -35,9 +35,9 @@ static void *vsync_thread(void *arg) {
             // the app isn't frontmost - checked and set again here; the window's focus says whether it was frontmost)
             static int warned;
             int rt = plat_thread_realtime_check(period);
-            extern bool ui_window_focused(void);
+            extern bool gl_backend_window_focused(void);
             if (warned++ < 40) LOG("[vi] vsync timer late by %llums (window focused %d, real-time policy %s)\n", (unsigned long long)((now - next) / 1000000),
-                                    ui_window_focused(), rt == 0 ? "holds" : rt == 1 ? "was gone: set again" : "unknown");
+                                    gl_backend_window_focused(), rt == 0 ? "holds" : rt == 1 ? "was gone: set again" : "unknown");
             next = now;  // don't burst-signal to catch up
         }
         __atomic_add_fetch(&g_vsync_count, 1, __ATOMIC_RELEASE);

@@ -519,8 +519,6 @@ static void ex_set_data_source(Cpu *c) {
     char host[1024];
     snprintf(host, sizeof host, "%s/%s", g_romfs_dir, rel ? rel : "");
     LOG("[movie] open %s -> %s\n", path ? path : "(null)", host);
-    { extern void pace_hitch(const char *why);  // nvn/pace.c
-      pace_hitch("a movie"); }
     if (avformat_open_input(&e->fmt, host, NULL, NULL) < 0 || avformat_find_stream_info(e->fmt, NULL) < 0) {
         LOG("[movie] cannot open %s\n", host);
         if (e->fmt) avformat_close_input(&e->fmt);
@@ -529,11 +527,9 @@ static void ex_set_data_source(Cpu *c) {
     }
     e->pkt = av_packet_alloc();
     if (!e->pkt) { avformat_close_input(&e->fmt); c->x[0] = 1; return; }
-    // the opening at launch can always be skipped, vanilla and randomizer (with no save yet the game forces it)
+    // the opening at launch can always be skipped
     e->skippable = rel && strstr(rel, "movie/opening.webm");
     if (e->skippable) g_skip_pressed_at = 0;  // (a press that ended the title's attract replay isn't for this one)
-    if (rel && strstr(rel, "movie/ending.webm")) { extern void run_timer_ending_movie(void); run_timer_ending_movie(); }  // (the run's end)
-    if (rel && strstr(rel, "movie/title.webm")) { extern void run_timer_title(void); run_timer_title(); }  // (a new attempt next)
     for (unsigned i = 0; i < e->fmt->nb_streams && e->ntracks < 16; i++)
         if (e->fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO ||
             (e->fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && g_settings.movie_audio && !getenv("LARECOMP_NO_MOVIE_AUDIO")))
@@ -762,10 +758,6 @@ static void dec_signal(Cpu *c, Decoder *d, int i) {
     if (!d->stopped) signal_guest_event(c, d->events[i]);
     pthread_mutex_unlock(&d->lock);
 }
-
-typedef struct NvnTexture NvnTexture;
-void renderer_upload_rgba(NvnTexture *t, const void *rgba, uint32_t w, uint32_t h, uint32_t stride);
-bool renderer_upload_nv12(NvnTexture *t, const void *nv12, uint32_t w, uint32_t h, uint32_t stride, uint32_t uv_off);
 
 static void dec_configure(Cpu *c) {
     Decoder *d = self_state(c);
@@ -1038,35 +1030,11 @@ static void dec_get_output_buffer(Cpu *c) {
         }
     }
     if (d->video && b->base && b->capacity == 8) {
-        if (gl_backend_is_active()) {
-            static bool warned_gl_tex;
-            if (!warned_gl_tex) {
-                warned_gl_tex = true;
-                LOG("[movie] GL backend active: skipping NVN texture upload in Decoder::GetOutputBuffer\n");
-            }
-            c->x[0] = 0;
-            return;
+        static bool warned_gl_tex;
+        if (!warned_gl_tex) {
+            warned_gl_tex = true;
+            LOG("[movie] GL backend active: skipping NVN texture upload in Decoder::GetOutputBuffer\n");
         }
-        // texture output mode: the buffer points at the game's NVNtexture; write RGBA into it
-        NvnTexture *t = *(NvnTexture **)(uintptr_t)b->base;
-        int w = d->width, h = d->height;
-        // the GPU converts it (renderer_upload_nv12); LARECOMP_MOVIE_CPU_CONVERT=1: swscale + an RGBA upload, as before
-        static int gpu = -1;
-        if (gpu < 0) gpu = !getenv("LARECOMP_MOVIE_CPU_CONVERT");
-        if (gpu && renderer_upload_nv12(t, d->out_mem[i], (uint32_t)w, (uint32_t)h, (uint32_t)d->stride,
-                                        d->uv_off)) {
-            c->x[0] = 0;
-            return;
-        }
-        if (!d->sws)
-            d->sws = sws_getContext(w, h, AV_PIX_FMT_NV12, w, h, AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
-        if (!d->rgba) d->rgba = malloc((size_t)w * h * 4);
-        const uint8_t *src[2] = {d->out_mem[i], d->out_mem[i] + d->uv_off};
-        int src_stride[2] = {d->stride, d->stride};
-        uint8_t *dst[1] = {d->rgba};
-        int dst_stride[1] = {w * 4};
-        sws_scale(d->sws, src, src_stride, 0, h, dst, dst_stride);
-        renderer_upload_rgba(t, d->rgba, (uint32_t)w, (uint32_t)h, (uint32_t)w * 4);
         c->x[0] = 0;
         return;
     }

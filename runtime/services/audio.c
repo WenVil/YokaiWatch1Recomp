@@ -8,7 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include "../hle.h"
-#include "../nvn/renderer.h"
+#include "../gl/gl_backend.h"
 #include "../settings.h"
 #include "../ipc.h"
 
@@ -626,7 +626,7 @@ static void render_frame(Renderer *r, float *stereo) {
 static void apply_gain(SDL_AudioStream *st) {
     static double env = -1;
     if (env < 0) env = getenv("LARECOMP_AUDIO_GAIN") ? atof(getenv("LARECOMP_AUDIO_GAIN")) : 1.0;
-    float g = (g_settings.mute_unfocused && !ui_window_focused()) ? 0.0f : (float)(env * g_settings.volume);
+    float g = (g_settings.mute_unfocused && !gl_backend_window_focused()) ? 0.0f : (float)(env * g_settings.volume);
     if (st && SDL_GetAudioStreamGain(st) != g) SDL_SetAudioStreamGain(st, g);
 }
 

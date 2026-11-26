@@ -46,75 +46,54 @@ static bool contains_nocase(const char *hay, const char *needle) {  // (no strca
     return false;
 }
 
-// The graphics driver's own code (the crash was inside it, not in LAS Recomp): Vulkan drivers on Windows / Linux,
-// Apple's Metal driver
+// The graphics driver's own code (the crash was inside it, not in Yo-kai Watch 1 Recompiled): OpenGL / Mesa drivers
 static bool in_gpu_driver(uint64_t pc) {
     char m[512];
     if (!pc || !plat_module_name(pc, m, sizeof m)) return false;
-    static const char *const drivers[] = {"nvoglv", "nvgpucomp", "nvwgf", "libnvidia", "amdvlk", "amdxc", "atiumd",
-                                          "atig6", "igvk", "igc64", "igd", "libvulkan_radeon", "libvulkan_intel",
-                                          "libvulkan_nouveau", "libvulkan_lvp", "libvulkan_virtio", "AGXMetal",
-                                          "MTLCompiler", "libLLVM", "radeonsi"};
+    static const char *const drivers[] = {"nvoglv", "nvgpucomp", "nvwgf", "libnvidia", "atio6axx", "atig6",
+                                          "ig9icd", "igxelpicd", "igc64", "igd", "radeonsi", "iris", "nouveau",
+                                          "llvmpipe", "libGL", "opengl32", "libLLVM"};
     for (size_t i = 0; i < sizeof drivers / sizeof *drivers; i++)
         if (contains_nocase(m, drivers[i])) return true;
     return false;
 }
 
 void rt_crash_explain(char *out, size_t n, const char *log_path) {
-    static const char *const report = "Please report it as a GitHub issue and attach the log file below. "
+    static const char *const report = "Please attach the log file below when reporting an issue. "
                                       "Your progress up to your last save or autosave is safe.";
     char head[160], what[400];
-    if (rt_romfs_files >= 0 && rt_romfs_files < ROMFS_FILES) {
-        snprintf(head, sizeof head, "Your game files are incomplete");
-        snprintf(what, sizeof what, "13SentinelsRecomp found %d of the game's %d files, and the game stopped when it needed "
-                 "one that's missing. Copy your game files again so none are missing, then set them up again on the "
-                 "start screen (Game Files).", rt_romfs_files, (int)ROMFS_FILES);
-    } else if (has("doesn't fit its language")) {
-        snprintf(head, sizeof head, "Your game files' text has been changed");
-        snprintf(what, sizeof what, "The game's text for this language comes from another language (a translation "
-                 "patch), and the game stopped at a question it can't show that way. Set up unmodified game files on "
-                 "the start screen (Game Files). To play in another language, pick it in Settings (Language).");
-    } else if (has("built for another version")) {
-        snprintf(head, sizeof head, "The game code was built for other game files or another version of 13SentinelsRecomp");
-        snprintf(what, sizeof what, "Start 13SentinelsRecomp again: the start screen rebuilds the game code for these game "
-                 "files by itself.");
+    if (has("built for another version")) {
+        snprintf(head, sizeof head, "The game code was built for other game files or another build");
+        snprintf(what, sizeof what, "Start Yo-kai Watch 1 Recompiled again so the launcher rebuilds the game code.");
     } else if (has("unsupported version of the game")) {
         snprintf(head, sizeof head, "Wrong version of the game");
-        snprintf(what, sizeof what, "13SentinelsRecomp needs Asia 1.00 or US/EU 1.00/1.10 of the game. Set up those game "
-                 "files on the start screen (Game Files).");
+        snprintf(what, sizeof what, "Yo-kai Watch 1 Recompiled needs Yo-kai Watch 1 (Nintendo Switch) v1.3.0 JP game files.");
+    } else if (has("yw1_a.fa") || has("cannot read the game data") || has("exefs/main")) {
+        snprintf(head, sizeof head, "Your game files are incomplete or missing");
+        snprintf(what, sizeof what, "Select the extracted game folder containing exefs/main and romfs/yw1_a.fa on the launcher screen.");
     } else if (has("no font for the game's text")) {
         snprintf(head, sizeof head, "No font for the game's text");
-        snprintf(what, sizeof what, "Import the Switch fonts in Settings (Game font), or reinstall 13SentinelsRecomp - it "
-                 "comes with a font of its own.");
-    } else if (rt_romfs_files >= ROMFS_FILES &&
-               (rt_romfs_missing > 0 ||
-                (game_romfs_bytes(game_version()) && rt_romfs_bytes != game_romfs_bytes(game_version())))) {
-        snprintf(head, sizeof head, "Your game files are damaged or changed");
-        snprintf(what, sizeof what, "All of the game's files are there, but some don't match the game, and the game "
-                 "stopped when it needed one of them. Copy your game files again, then set them up again on the start "
-                 "screen (Game Files).");
-    } else if (has("get_terminate") || has("uncaught C++ exception")) {  // (the game threw: recompiled code can't
-                                                                         // unwind; runtime/hle/warp.c rt_cxa_throw)
+        snprintf(what, sizeof what, "Ensure system CJK/UI fonts or bundled fallback fonts are available.");
+    } else if (has("get_terminate") || has("uncaught C++ exception")) {
         snprintf(head, sizeof head, "The game ran into an error it couldn't recover from");
-        snprintf(what, sizeof what, "This is a bug in 13SentinelsRecomp, not a problem with your game files or PC. %s", report);
+        snprintf(what, sizeof what, "This is a runtime bug in Yo-kai Watch 1 Recompiled. %s", report);
     } else if (in_gpu_driver(g_pc)) {
         snprintf(head, sizeof head, "Your graphics driver crashed");
-        snprintf(what, sizeof what, "Update your graphics driver (NVIDIA, AMD or Intel) and try again. If it keeps "
-                 "happening, please report it with the log file below.");
-    } else if (has("VK_") || has("Vulkan")) {
-        snprintf(head, sizeof head, "Graphics driver error");
-        snprintf(what, sizeof what, "13SentinelsRecomp needs a graphics driver with Vulkan 1.3: install the latest driver for "
-                 "your GPU (NVIDIA, AMD or Intel). If it keeps happening, please report it with the log file below.");
+        snprintf(what, sizeof what, "Update your graphics driver (NVIDIA, AMD or Intel) and try again. %s", report);
+    } else if (has("OpenGL") || has("GL_") || has("SDL_GL")) {
+        snprintf(head, sizeof head, "OpenGL graphics driver error");
+        snprintf(what, sizeof what, "Yo-kai Watch 1 Recompiled requires OpenGL 4.5 Compatibility support. Update your GPU driver. %s", report);
     } else if (has("out of memory") || has("cannot allocate") || has("alloc failed")) {
         snprintf(head, sizeof head, "Out of memory");
         snprintf(what, sizeof what, "Close other programs and try again.");
     } else if (g_pc && rt_host_fn_name(g_pc, NULL)) {
         snprintf(head, sizeof head, "The game crashed");
-        snprintf(what, sizeof what, "This is a bug in 13SentinelsRecomp, not a problem with your game files or PC. %s", report);
+        snprintf(what, sizeof what, "This is a bug in Yo-kai Watch 1 Recompiled. %s", report);
     } else {
-        snprintf(head, sizeof head, "13SentinelsRecomp stopped because of an error");
+        snprintf(head, sizeof head, "Yo-kai Watch 1 Recompiled stopped because of an error");
         snprintf(what, sizeof what, "%s", report);
     }
+    (void)rt_romfs_files; (void)rt_romfs_bytes; (void)rt_romfs_missing; (void)ROMFS_FILES;
     fprintf(stderr, "[crash] %s\n", head);
     if (log_path && *log_path) snprintf(out, n, "%s\n\n%s\n\nLog file:\n%s", head, what, log_path);
     else snprintf(out, n, "%s\n\n%s", head, what);

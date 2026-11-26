@@ -16,15 +16,15 @@
 #define SETTINGS_FILE settings_file()
 
 // LARECOMP_SETTINGS=<path>: another settings file (test runs never touch user config).
-// Otherwise writes 13sentinels.ini, and falls back to reading legacy larecomp.ini if present.
+// Otherwise reads/writes yokaiwatch1.ini in the data root.
 static const char *settings_file(void) {
     const char *e = getenv("LARECOMP_SETTINGS");
-    return e && *e ? e : "13sentinels.ini";
+    return e && *e ? e : "yokaiwatch1.ini";
 }
 
 static const char *settings_read_file(void) {
     const char *e = getenv("LARECOMP_SETTINGS");
-    return (e && *e) ? e : "13sentinels.ini";
+    return (e && *e) ? e : "yokaiwatch1.ini";
 }
 
 static FILE *open_utf8(const char *path, const char *mode) {
@@ -37,13 +37,7 @@ static FILE *open_utf8(const char *path, const char *mode) {
     return fopen(path, mode);
 }
 
-const char *const g_enemy_colour_modes[N_ENEMY_COLOUR_MODES] = {"Off", "Random per seed", "Random every load"};
-static const char *const k_enemy_colour_keys[N_ENEMY_COLOUR_MODES] = {"off", "seed", "load"};  // (larecomp.ini)
-const char *const g_screen_filters[N_SCREEN_FILTERS] = {"Off", "Game Boy", "Game Boy Color", "Grayscale"};
-static const char *const k_screen_filter_keys[N_SCREEN_FILTERS] = {"off", "gameboy", "gameboy_color", "grayscale"};  // (else: off)
-
 Settings g_settings = {
-    .aspect = ASPECT_UNLOCKED,
     .fullscreen = false,
     .volume = 1.0f,
     .reverb = true,
@@ -53,19 +47,9 @@ Settings g_settings = {
     .controller_light = true,
     .menu_confirm = MENU_CONFIRM_CONTROLLER,
     .show_fps = false,
-    .inv_keys = true,
-    .tracker = true,
-    .tracker_filters = -1,
-    .chaos_letters = CHAOS_LETTERS_MAP,
-    .diff_damage = 1.0f,
-    .walk_speed = 1.0f,
-    .walk_speed_dungeons = false,
-    .upscaler = UPSCALE_SHARP,  // (MetalFX on macOS, AMD FSR 1 on Windows)
-    .upscaler_auto = true,
-    .res_auto = true,
-    .livesplit_host = "localhost:16834",
+    .dpad_move = true,
 #ifndef __APPLE__
-    .bg_input = true,  // (as before the setting; on macOS it needs Input Monitoring permission, so Off there)
+    .bg_input = true,
 #endif
     .window_mode = WIN_WINDOWED,
     .output_res = OUT_RES_AUTO,
@@ -82,9 +66,6 @@ Settings g_settings = {
     .game_lang = GAME_LANG_ZH_HANS,
     .game_dir = "",
     .skip_launcher = false,
-    .vk_wait_pipes = true,
-    .vk_copy_vertices = true,
-    .vk_gpu_overlap = true,
     .hotkey_menu = SDL_SCANCODE_F1,
     .hotkey_hud = SDL_SCANCODE_F2,
     .hotkey_speed = SDL_SCANCODE_F3,
@@ -198,8 +179,8 @@ const char *settings_game_lang_code(void) {
     default: break;
     }
     const GameVersion *gv = game_version();
-    if (gv && (strncmp(gv->key, "v13_us", 6) == 0 || strncmp(gv->key, "v13_eu", 6) == 0)) {
-        return "en-US";
+    if (gv && !strcmp(gv->key, "vyw1_jp_v1_3_0")) {
+        return "ja";
     }
     switch (settings_resolved_ui_lang()) {
     case UI_LANG_ZH_HANT: return "zh-Hant";
@@ -213,10 +194,6 @@ const char *settings_game_lang_code(void) {
 const char *settings_language(void) {
     const char *env = getenv("LARECOMP_LANG");
     if (env && *env) return normalize_lang_code(env);
-    // For non-v13 games (Zelda) honor explicit legacy `language` choice; otherwise prefer 13S `game_lang`.
-    const GameVersion *gv = game_version();
-    if (gv && strncmp(gv->key, "v13_", 4) != 0 && g_settings.language > LANG_AUTO && g_settings.language < N_LANGUAGES)
-        return g_language_codes[g_settings.language];
     return settings_game_lang_code();
 }
 
@@ -224,12 +201,8 @@ const char *settings_language_name(void) {
     const char *c = settings_language();
     for (int i = 0; i < N_LANGUAGES; i++)
         if (!strcmp(c, g_language_codes[i])) return g_language_names[i];
-    return "English";
+    return "Japanese";
 }
-
-int g_default_upscaler = UPSCALE_SHARP;
-int g_default_res_mode = RES_MATCH;
-bool g_gpu_integrated;
 
 static const char *const k_window_modes[] = {"windowed", "borderless", "exclusive"};
 static const char *const k_output_res[] = {"auto", "720p", "1080p", "1440p", "4k"};
@@ -260,40 +233,12 @@ static int parse_hotkey(const char *val, int fallback) {
 
 static int clamp_int(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-static const char *res_name(int m) {
-    static char n[8];
-    if (m == RES_1_5X) return "1.5x";
-    if (m >= 1 && m <= 8) { snprintf(n, sizeof n, "%dx", m); return n; }
-    return m == RES_DYNAMIC ? "dynamic" : m == RES_Q75 ? "75%" : m == RES_Q50 ? "50%" : m == RES_Q25 ? "25%" : "match";
-}
-
-void settings_resolve_defaults(bool integrated) {
-    const char *e = getenv("LARECOMP_INTEGRATED");
-    if (e && *e) integrated = atoi(e) != 0;
-    g_gpu_integrated = integrated;
-    g_default_upscaler = integrated ? UPSCALE_BILINEAR : UPSCALE_SHARP;
-    g_default_res_mode = RES_MATCH;  // (Dynamic is not a default until it is reliable: user 2026-10-18)
-    if (g_settings.upscaler_auto) g_settings.upscaler = g_default_upscaler;
-    if (g_settings.res_auto) g_settings.res_mode = g_default_res_mode;
-    LOG("[settings] %s GPU: upscaler %s (%s), resolution %s (%s), anti-aliasing %s\n", integrated ? "integrated" : "discrete / other",
-        g_settings.upscaler == UPSCALE_BILINEAR ? "bilinear" : g_settings.upscaler == UPSCALE_FSR1 ? "fsr1" : "metalfx",
-        g_settings.upscaler_auto ? "default" : "chosen", res_name(g_settings.res_mode), g_settings.res_auto ? "default" : "chosen",
-        g_settings.antialias == AA_SMAA ? "smaa" : "off");
-}
-
 void settings_load(void) {
     static bool loaded;
     if (loaded) return;
     loaded = true;
     const char *src = settings_read_file();
     FILE *f = open_utf8(src, "r");
-    if (!f && !getenv("LARECOMP_SETTINGS")) {
-        FILE *legacy = open_utf8("larecomp.ini", "r");
-        if (legacy) {
-            f = legacy;
-            src = "larecomp.ini";
-        }
-    }
     if (!f) return;
     char line[2048];
     bool tip_key = false, aspect_key = false;
@@ -308,17 +253,12 @@ void settings_load(void) {
         char val[1024] = {0};
         int fields = sscanf(line, " %63[^= ] = %1023[^\n]", key, val);
         if (fields < 1) continue;
-        if (!strcmp(key, "rando_seed")) {
-            strlcpy(g_settings.rando_seed, val, sizeof g_settings.rando_seed);
-            continue;
-        }
         if (!strcmp(key, "game_dir")) {
             strlcpy(g_settings.game_dir, val, sizeof g_settings.game_dir);
             continue;
         }
         if (fields != 2) continue;
-        if (!strcmp(key, "aspect")) g_settings.aspect = !strcmp(val, "original") ? ASPECT_ORIGINAL : ASPECT_UNLOCKED;
-        else if (!strcmp(key, "fullscreen")) { g_settings.fullscreen = atoi(val) != 0; seen_fs = true; }
+        if (!strcmp(key, "fullscreen")) { g_settings.fullscreen = atoi(val) != 0; seen_fs = true; }
         else if (!strcmp(key, "window_mode")) { g_settings.window_mode = parse_choice(val, k_window_modes, 3, WIN_WINDOWED); seen_win_mode = true; }
         else if (!strcmp(key, "output_res")) g_settings.output_res = parse_choice(val, k_output_res, 5, OUT_RES_AUTO);
         else if (!strcmp(key, "aspect_mode")) g_settings.aspect_mode = parse_choice(val, k_aspect_modes, 2, ASPECT_MODE_LOCK_16_9);
@@ -330,75 +270,24 @@ void settings_load(void) {
         else if (!strcmp(key, "mute_unfocused")) g_settings.mute_unfocused = atoi(val) != 0;
         else if (!strcmp(key, "audio_channels")) g_settings.audio_channels = parse_choice(val, k_audio_channels, 3, AUDIO_CH_AUTO);
         else if (!strcmp(key, "show_fps")) { g_settings.show_fps = atoi(val) != 0; seen_show_fps = true; }
-        else if (!strcmp(key, "resolution")) {  // (auto: never chosen, the GPU's default)
-            int n = atoi(val);
-            g_settings.res_auto = !strcmp(val, "auto");
-            if (g_settings.res_auto) { g_settings.res_mode = g_default_res_mode; continue; }
-            g_settings.res_mode = !strcmp(val, "dynamic") ? RES_DYNAMIC : (!strcmp(val, "75%") || !strcmp(val, "67%")) ? RES_Q75 :
-                                  !strcmp(val, "50%") ? RES_Q50 : !strcmp(val, "25%") ? RES_Q25 :
-                                  !strcmp(val, "1.5x") ? RES_1_5X :
-                                  (n >= 1 && n <= 4) ? n : n > 4 ? 4 : RES_MATCH;  // (5x-8x were removed)
-        }
-        else if (!strcmp(key, "upscaler")) {  // (metalfx / fsr1: this OS's; auto: never chosen, the GPU's default)
-            g_settings.upscaler_auto = !strcmp(val, "auto");
-            if (!g_settings.upscaler_auto) g_settings.upscaler = !strcmp(val, "bilinear") ? UPSCALE_BILINEAR : UPSCALE_SHARP;
-            else g_settings.upscaler = g_default_upscaler;
-        }
-        else if (!strcmp(key, "antialias")) g_settings.antialias = !strcmp(val, "off") ? AA_OFF : AA_SMAA;  // ("fxaa": SMAA now)
-        else if (!strcmp(key, "inv_keys")) g_settings.inv_keys = atoi(val) != 0;
         else if (!strcmp(key, "dpad_move")) g_settings.dpad_move = atoi(val) != 0;
         else if (!strcmp(key, "rumble")) g_settings.rumble = atoi(val) != 0;
         else if (!strcmp(key, "rumble_strength")) g_settings.rumble_strength = atoi(val);
         else if (!strcmp(key, "controller_light")) g_settings.controller_light = atoi(val) != 0;
         else if (!strcmp(key, "background_input")) g_settings.bg_input = atoi(val) != 0;
-        else if (!strcmp(key, "move_360")) g_settings.move_360 = atoi(val) != 0;
-        else if (!strcmp(key, "blur_removal")) g_settings.blur_removal = atoi(val) != 0;
-        else if (!strcmp(key, "hide_hero_icon")) g_settings.hide_hero_icon = atoi(val) != 0;
-        else if (!strcmp(key, "mirror_mode")) g_settings.mirror_mode = atoi(val) != 0;
         else if (!strcmp(key, "prompts")) g_settings.prompts = !strcmp(val, "nintendo") ? PROMPTS_NINTENDO : !strcmp(val, "xbox") ?
                                                               PROMPTS_XBOX : !strcmp(val, "playstation") ? PROMPTS_PLAYSTATION : PROMPTS_AUTO;
         else if (!strcmp(key, "menu_confirm")) g_settings.menu_confirm = !strcmp(val, "game") ? MENU_CONFIRM_GAME
                                                                                                   : MENU_CONFIRM_CONTROLLER;
-        else if (!strcmp(key, "language")) {  // ("auto" or one of the game's codes; anything else: auto)
-            // (zh-CN / zh-TW: what a settings file from before this wrote; the game reads zh-Hans / zh-Hant)
+        else if (!strcmp(key, "language")) {
             const char *v = !strcmp(val, "zh-CN") ? "zh-Hans" : !strcmp(val, "zh-TW") ? "zh-Hant" : val;
             g_settings.language = LANG_AUTO;
             for (int i = 1; i < N_LANGUAGES; i++)
                 if (!strcmp(v, g_language_codes[i])) g_settings.language = i;
         }
-        else if (!strcmp(key, "tracker")) g_settings.tracker = atoi(val) != 0;
-        else if (!strcmp(key, "tracker_filters")) g_settings.tracker_filters = atoi(val);
         else if (!strcmp(key, "menu_tip_seen")) g_settings.menu_tip_seen = atoi(val) != 0, tip_key = true;
         else if (!strcmp(key, "aspect_asked")) g_settings.aspect_asked = atoi(val) != 0, aspect_key = true;
         else if (!strcmp(key, "onedrive_kept")) g_settings.onedrive_kept = atoi(val) != 0;
-        else if (!strcmp(key, "chaos_letters"))
-            g_settings.chaos_letters = !strcmp(val, "off") ? CHAOS_LETTERS_OFF : !strcmp(val, "explored") ? CHAOS_LETTERS_EXPLORED : CHAOS_LETTERS_MAP;
-        else if (!strcmp(key, "cheat_hearts")) g_settings.cheat_hearts = atoi(val) != 0;
-        else if (!strcmp(key, "cheat_ammo")) g_settings.cheat_ammo = atoi(val) != 0;
-        else if (!strcmp(key, "cheat_rupees")) g_settings.cheat_rupees = atoi(val) != 0;
-        else if (!strcmp(key, "cheat_hookshot")) g_settings.cheat_hookshot = atoi(val) != 0;
-        else if (!strcmp(key, "no_buff_drops")) g_settings.no_buff_drops = atoi(val) != 0;
-        else if (!strcmp(key, "diff_damage")) g_settings.diff_damage = (float)atof(val);
-        else if (!strcmp(key, "walk_speed")) g_settings.walk_speed = (float)atof(val);
-        else if (!strcmp(key, "walk_speed_dungeons")) g_settings.walk_speed_dungeons = atoi(val) != 0;
-        else if (!strcmp(key, "diff_ohko")) g_settings.diff_ohko = atoi(val) != 0;
-        else if (!strcmp(key, "diff_hero")) g_settings.diff_hero = atoi(val) != 0;
-        else if (!strcmp(key, "timer")) g_settings.timer = atoi(val) != 0;
-        else if (!strcmp(key, "timer_position")) g_settings.timer_pos = !strcmp(val, "right") ? TIMER_POS_RIGHT : TIMER_POS_LEFT;
-        else if (!strcmp(key, "livesplit")) g_settings.livesplit = atoi(val) != 0;
-        else if (!strcmp(key, "rando_options")) strlcpy(g_settings.rando_options, val, sizeof g_settings.rando_options);
-        else if (!strcmp(key, "livesplit_host")) strlcpy(g_settings.livesplit_host, val, sizeof g_settings.livesplit_host);
-        else if (!strcmp(key, "tunic")) col_parse(&g_settings.tunic, val);  // (colour rows: runtime/cosmetic_colour.c)
-        else if (!strcmp(key, "hearts")) col_parse(&g_settings.hearts, val);
-        else if (!strcmp(key, "hair")) col_parse(&g_settings.hair, val);
-        else if (!strcmp(key, "shield")) col_parse(&g_settings.shield, val);
-        else if (!strcmp(key, "skin")) col_parse(&g_settings.skin, val);
-        else if (!strcmp(key, "leaves")) col_parse(&g_settings.leaves, val);
-        else if (!strcmp(key, "grass")) col_parse(&g_settings.grass, val);
-        else if (!strcmp(key, "sand")) col_parse(&g_settings.sand, val);
-        else if (!strcmp(key, "screen_filter")) {
-            for (int i = 0; i < N_SCREEN_FILTERS; i++) if (!strcmp(val, k_screen_filter_keys[i])) g_settings.screen_filter = i;
-        }
         else if (!strcmp(key, "ls_deadzone")) g_settings.ls_deadzone = clamp_int(atoi(val), 0, 40);
         else if (!strcmp(key, "rs_deadzone")) g_settings.rs_deadzone = clamp_int(atoi(val), 0, 40);
         else if (!strcmp(key, "trigger_threshold")) g_settings.trigger_threshold = clamp_int(atoi(val), 10, 90);
@@ -413,16 +302,10 @@ void settings_load(void) {
             g_settings.game_lang = parse_choice(v ? v : val, k_game_langs, N_GAME_LANGS, GAME_LANG_ZH_HANS);
         }
         else if (!strcmp(key, "skip_launcher")) g_settings.skip_launcher = atoi(val) != 0;
-        else if (!strcmp(key, "vk_wait_pipes")) g_settings.vk_wait_pipes = atoi(val) != 0;
-        else if (!strcmp(key, "vk_copy_vertices")) g_settings.vk_copy_vertices = atoi(val) != 0;
-        else if (!strcmp(key, "vk_gpu_overlap")) g_settings.vk_gpu_overlap = atoi(val) != 0;
         else if (!strcmp(key, "hotkey_menu")) g_settings.hotkey_menu = parse_hotkey(val, SDL_SCANCODE_F1);
         else if (!strcmp(key, "hotkey_hud")) g_settings.hotkey_hud = parse_hotkey(val, SDL_SCANCODE_F2);
         else if (!strcmp(key, "hotkey_speed")) g_settings.hotkey_speed = parse_hotkey(val, SDL_SCANCODE_F3);
         else if (!strcmp(key, "hotkey_fullscreen")) g_settings.hotkey_fullscreen = parse_hotkey(val, SDL_SCANCODE_F11);
-        else if (!strcmp(key, "enemy_colours")) {
-            for (int i = 0; i < N_ENEMY_COLOUR_MODES; i++) if (!strcmp(val, k_enemy_colour_keys[i])) g_settings.enemy_colours = i;
-        }
         else {
             if (!strcmp(key, "bind_pad_a") || !strcmp(key, "bind_pad_b") || !strcmp(key, "bind_pad_x") || !strcmp(key, "bind_pad_y"))
                 seen_pad_face = true;
@@ -430,8 +313,8 @@ void settings_load(void) {
         }
     }
     fclose(f);
-    if (!tip_key) g_settings.menu_tip_seen = true;  // (a settings file from before the note: not a first launch)
-    if (!aspect_key) g_settings.aspect_asked = true;  // (likewise: the aspect ratio was chosen already)
+    if (!tip_key) g_settings.menu_tip_seen = true;
+    if (!aspect_key) g_settings.aspect_asked = true;
     if (seen_win_mode) g_settings.fullscreen = (g_settings.window_mode != WIN_WINDOWED);
     else if (seen_fs && g_settings.fullscreen) g_settings.window_mode = WIN_BORDERLESS;
     if (seen_hud_mode) g_settings.show_fps = (g_settings.hud_mode != HUD_OFF);
@@ -454,8 +337,7 @@ static void save_hotkey(FILE *f, const char *key, int sc) {
 void settings_save(void) {
     FILE *f = open_utf8(SETTINGS_FILE, "w");
     if (!f) { LOG("[settings] cannot write %s\n", SETTINGS_FILE); return; }
-    fprintf(f, "# 13SentinelsRecomp settings (edited from the in-game menu: F1, or Minus+Plus on a controller)\n");
-    fprintf(f, "aspect = %s\n", g_settings.aspect == ASPECT_ORIGINAL ? "original" : "unlocked");
+    fprintf(f, "# YokaiWatch1Recomp settings (edited from the in-game menu: F1, or Minus+Plus on a controller)\n");
     fprintf(f, "window_mode = %s\n", k_window_modes[clamp_int(g_settings.window_mode, 0, 2)]);
     fprintf(f, "fullscreen = %d\n", g_settings.window_mode != WIN_WINDOWED ? 1 : 0);
     fprintf(f, "output_res = %s\n", k_output_res[clamp_int(g_settings.output_res, 0, 4)]);
@@ -468,53 +350,17 @@ void settings_save(void) {
     fprintf(f, "mute_unfocused = %d\n", g_settings.mute_unfocused);
     fprintf(f, "audio_channels = %s\n", k_audio_channels[clamp_int(g_settings.audio_channels, 0, 2)]);
     fprintf(f, "show_fps = %d\n", g_settings.hud_mode != HUD_OFF ? 1 : 0);
-    fprintf(f, "upscaler = %s\n", g_settings.upscaler_auto ? "auto" : g_settings.upscaler == UPSCALE_METALFX ? "metalfx" :
-                                   g_settings.upscaler == UPSCALE_FSR1 ? "fsr1" : "bilinear");
-    fprintf(f, "antialias = %s\n", g_settings.antialias == AA_SMAA ? "smaa" : "off");
-    fprintf(f, "resolution = %s\n", g_settings.res_auto ? "auto" : res_name(g_settings.res_mode));
-    fprintf(f, "inv_keys = %d\n", g_settings.inv_keys);
     fprintf(f, "dpad_move = %d\n", g_settings.dpad_move);
     fprintf(f, "rumble = %d\n", g_settings.rumble);
     fprintf(f, "rumble_strength = %d\n", g_settings.rumble_strength);
     fprintf(f, "controller_light = %d\n", g_settings.controller_light);
     fprintf(f, "background_input = %d\n", g_settings.bg_input);
-    fprintf(f, "move_360 = %d\nblur_removal = %d\nhide_hero_icon = %d\n", g_settings.move_360, g_settings.blur_removal,
-            g_settings.hide_hero_icon);
     static const char *const prompts[] = {"auto", "nintendo", "xbox", "playstation"};
     fprintf(f, "prompts = %s\n", prompts[g_settings.prompts & 3]);
     fprintf(f, "menu_confirm = %s\n", g_settings.menu_confirm == MENU_CONFIRM_CONTROLLER ? "controller" : "game");
-    fprintf(f, "mirror_mode = %d\n", g_settings.mirror_mode);
-    fprintf(f, "language = %s\n", g_language_codes[g_settings.language > LANG_AUTO && g_settings.language < N_LANGUAGES
-                                                     ? g_settings.language : LANG_AUTO]);
-    fprintf(f, "tracker = %d\n", g_settings.tracker);
-    if (g_settings.tracker_filters >= 0) fprintf(f, "tracker_filters = %d\n", g_settings.tracker_filters);
     fprintf(f, "aspect_asked = %d\n", g_settings.aspect_asked);
     fprintf(f, "menu_tip_seen = %d\n", g_settings.menu_tip_seen);
     fprintf(f, "onedrive_kept = %d\n", g_settings.onedrive_kept);
-    static const char *const letters[] = {"off", "explored", "map"};
-    fprintf(f, "chaos_letters = %s\n", letters[g_settings.chaos_letters]);
-    fprintf(f, "cheat_hearts = %d\ncheat_ammo = %d\ncheat_rupees = %d\n", g_settings.cheat_hearts, g_settings.cheat_ammo,
-            g_settings.cheat_rupees);
-    fprintf(f, "cheat_hookshot = %d\n", g_settings.cheat_hookshot);
-    fprintf(f, "no_buff_drops = %d\n", g_settings.no_buff_drops);
-    fprintf(f, "diff_damage = %.2f\ndiff_ohko = %d\ndiff_hero = %d\n", g_settings.diff_damage, g_settings.diff_ohko,
-            g_settings.diff_hero);
-    fprintf(f, "walk_speed = %.2f\n", g_settings.walk_speed);
-    fprintf(f, "walk_speed_dungeons = %d\n", g_settings.walk_speed_dungeons);
-    fprintf(f, "timer_position = %s\n", g_settings.timer_pos == TIMER_POS_RIGHT ? "right" : "left");
-    fprintf(f, "timer = %d\nlivesplit = %d\nlivesplit_host = %s\n", g_settings.timer, g_settings.livesplit,
-            g_settings.livesplit_host);
-    static const struct { const char *key; const CosColour *c; } cols[] = {
-        {"tunic", &g_settings.tunic}, {"hearts", &g_settings.hearts}, {"hair", &g_settings.hair},
-        {"shield", &g_settings.shield}, {"skin", &g_settings.skin},
-        {"leaves", &g_settings.leaves}, {"grass", &g_settings.grass}, {"sand", &g_settings.sand}};
-    for (size_t i = 0; i < sizeof cols / sizeof *cols; i++) {
-        char v[16];
-        col_format(cols[i].c, v, sizeof v);
-        fprintf(f, "%s = %s\n", cols[i].key, v);
-    }
-    fprintf(f, "enemy_colours = %s\n", k_enemy_colour_keys[g_settings.enemy_colours]);
-    fprintf(f, "screen_filter = %s\n", k_screen_filter_keys[g_settings.screen_filter]);
     fprintf(f, "ls_deadzone = %d\nrs_deadzone = %d\ntrigger_threshold = %d\n",
             clamp_int(g_settings.ls_deadzone, 0, 40), clamp_int(g_settings.rs_deadzone, 0, 40),
             clamp_int(g_settings.trigger_threshold, 10, 90));
@@ -523,14 +369,10 @@ void settings_save(void) {
     fprintf(f, "game_lang = %s\n", k_game_langs[clamp_int(g_settings.game_lang, 0, N_GAME_LANGS - 1)]);
     fprintf(f, "game_dir = %s\n", g_settings.game_dir);
     fprintf(f, "skip_launcher = %d\n", g_settings.skip_launcher);
-    fprintf(f, "vk_wait_pipes = %d\nvk_copy_vertices = %d\nvk_gpu_overlap = %d\n",
-            g_settings.vk_wait_pipes, g_settings.vk_copy_vertices, g_settings.vk_gpu_overlap);
     save_hotkey(f, "hotkey_menu", g_settings.hotkey_menu);
     save_hotkey(f, "hotkey_hud", g_settings.hotkey_hud);
     save_hotkey(f, "hotkey_speed", g_settings.hotkey_speed);
     save_hotkey(f, "hotkey_fullscreen", g_settings.hotkey_fullscreen);
     bind_settings_save(f);
-    fprintf(f, "rando_seed = %s\n", g_settings.rando_seed);
-    if (g_settings.rando_options[0]) fprintf(f, "rando_options = %s\n", g_settings.rando_options);
     fclose(f);
 }

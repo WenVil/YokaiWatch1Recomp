@@ -2,9 +2,9 @@
 // the right (brighter when it isn't the default) - and the selected (controller) or hovered (mouse) row's description on
 // the right, instead of tooltips. A / click changes a row (toggle / next value), left / right step it.
 //
-//   opt_begin("##gameplay", scale);
-//   opt_section("Difficulty");
-//   if (opt_toggle("One-hit KO", &g_settings.diff_ohko, false, "Any hit defeats Link.")) settings_save();
+//   opt_begin("##display", scale);
+//   opt_section("Window");
+//   if (opt_toggle("Show FPS", &g_settings.show_fps, false, "Show FPS overlay.")) settings_save();
 //   opt_end();
 #pragma once
 
@@ -21,11 +21,7 @@ bool opt_slider(const char *label, float *v, float lo, float hi, float step, flo
 // (if given) is shown for lo instead (e.g. "Any")
 bool opt_int(const char *label, int *v, int lo, int hi, int step, int def, const char *fmt, const char *desc,
              const char *lo_name = NULL);
-// a Cosmetics colour row (the shared palette, runtime/cosmetic_colour.h): Default, the named colours, Random, Custom;
-// with Custom, a row under it shows the colour and opens a colour picker. True when the colour changed.
-struct CosColour;
-// slot: the row (COL_SLOT_*): on Default it shows the randomizer seed's colour as "Seed: <colour>" when it has one.
-bool opt_colour(const char *label, CosColour *c, int slot, const char *desc);
+// bool opt_int(...) rows above keep whole-number steppers consistent.
 // an action: true when activated
 bool opt_button(const char *label, const char *desc);
 // one of a set of choices (a ring on the right, filled when selected); true when chosen

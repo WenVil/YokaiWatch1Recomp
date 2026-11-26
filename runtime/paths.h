@@ -1,8 +1,7 @@
-// Where LAS Recomp keeps its files (runtime/paths.c).
+// Where Yo-kai Watch 1 Recompiled keeps its files (runtime/paths.c).
 //
-// Data root: everything the app writes or the user brings - extracted/ (game files), rando/ (seeds), save/,
-// cache/ (shaders / pipelines), fonts/ (imported), larecomp.ini. rt_paths_init() picks it and makes it the
-// working directory, so the rest of the runtime opens those by their relative names. In order:
+// Data root: everything the app writes or the user brings - extracted/ (game files), save/, save_backups/,
+// cache/, fonts/, yokaiwatch1.ini. rt_paths_init() picks it and makes it the working directory.
 //   1. LARECOMP_DATA_ROOT (tests, scratch installs)
 //   2. dev / portable mode: the starting directory already has extracted/ (a source checkout: `./build/lasrecomp
 //      extracted`, the test scripts) - used as is
@@ -24,7 +23,7 @@
 extern "C" {
 #endif
 
-#define RT_BUNDLE_ID "com.peiikai.lasrecomp"
+#define RT_BUNDLE_ID "com.yw1recomp.yokaiwatch1recomp"
 
 void rt_paths_init(void);         // first thing in main(), after plat_init
 void rt_set_headless(bool headless);  // suppress GUI error boxes (e.g. CLI --build-only)
@@ -75,7 +74,7 @@ void rt_window_icon(SDL_Window *w);  // the shipped icon.png, if any
 
 // Case-insensitive child folder lookup (<parent>/<name> or matching child case-insensitively).
 bool rt_find_subdir_icase(const char *parent, const char *name, char *out, size_t n);
-// Inspect save/save_0/ROBO13.DAT and copy it to save_backups/backup_YYYYMMDD_HHMMSS/ROBO13.DAT.
+// Inspect save/save_0 files and copy them to save_backups/backup_YYYYMMDD_HHMMSS/.
 bool rt_save_info(bool *exists_out, uint64_t *size_out, int64_t *mtime_sec_out);
 bool rt_save_backup(char *out_rel, size_t cap, char *err, size_t err_cap);
 

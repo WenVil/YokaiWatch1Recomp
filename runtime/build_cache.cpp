@@ -160,9 +160,9 @@ std::unique_ptr<BuildCache> acquire(const char *game_dir) {
     return c;
 }
 bool library_name(const std::string &s) {
-    if (s == "lasgame.dll" || s == "lasgame.so" || s == "lasgame.dylib")
+    if (s == "yw1game.dll" || s == "yw1game.so" || s == "yw1game.dylib")
         return true;
-    if (s.rfind("lasgame_", 0) != 0)
+    if (s.rfind("yw1game_", 0) != 0)
         return false;
     std::string rest = s.substr(8);
     for (const char *ext : {".dll", ".so", ".dylib"}) {
@@ -226,13 +226,13 @@ extern "C" BuildCache *build_cache_open(const char *game_dir, const char *spec, 
         auto c = acquire(game_dir);
         auto owner = c->root / "owner";
         if (fs::exists(owner))
-            need(read(owner, 64) == "LASBUILD3\n", "Unknown build cache; clear it from Game Files and retry.");
+            need(read(owner, 64) == "YW1BUILD3\n", "Unknown build cache; clear it from Game Files and retry.");
         else {
-            // Pre-receipt beta_5 caches are ours too; upgrade them without asking every existing player to clear.
+            // Pre-receipt caches: reset cleanly.
             recover(c.get());
             for (auto &e : fs::directory_iterator(c->root))
                 if (e.path().filename() != ".lock") fs::remove_all(e.path());
-            write(owner, "LASBUILD3\n");
+            write(owner, "YW1BUILD3\n");
         }
         recover(c.get());
         CacheSha256 key;
@@ -241,7 +241,7 @@ extern "C" BuildCache *build_cache_open(const char *game_dir, const char *spec, 
             auto h = digest(fs::canonical(fs::u8path(inputs[i])));
             key.add(h.data(), h.size());
         }
-        std::string identity = "LASBUILD3\n" + key.finish() + "\n";
+        std::string identity = "YW1BUILD3\n" + key.finish() + "\n";
         auto record = c->root / "identity";
         if (!fs::exists(record) || read(record, 128) != identity) {
             for (auto &e : fs::directory_iterator(c->root))
@@ -249,7 +249,7 @@ extern "C" BuildCache *build_cache_open(const char *game_dir, const char *spec, 
                     fs::remove_all(e.path());
             write(record, identity);
         }
-        write(c->root / "in-progress", "LASBUILD3\n");
+        write(c->root / "in-progress", "YW1BUILD3\n");
         return c.release();
     } catch (const std::exception &e) {
         error(why, cap, e);
@@ -289,7 +289,7 @@ extern "C" void build_cache_failed(BuildCache *c) {
 extern "C" bool build_cache_resumable(const char *game_dir) {
     try {
         auto root = fs::weakly_canonical(fs::absolute(fs::u8path(game_dir))) / ".gamebuild";
-        return read(root / "owner", 64) == "LASBUILD3\n" && read(root / "in-progress", 64) == "LASBUILD3\n";
+        return read(root / "owner", 64) == "YW1BUILD3\n" && read(root / "in-progress", 64) == "YW1BUILD3\n";
     } catch (...) { return false; }
 }
 extern "C" bool build_cache_present(const char *game_dir) {
@@ -420,7 +420,7 @@ extern "C" bool build_cache_clear(const char *game_dir, char *why, size_t cap) {
         for (auto &e : fs::directory_iterator(c->root))
             if (e.path().filename() != ".lock")
                 fs::remove_all(e.path());
-        write(c->root / "owner", "LASBUILD3\n");
+        write(c->root / "owner", "YW1BUILD3\n");
         return true;
     } catch (const std::exception &e) {
         error(why, cap, e);

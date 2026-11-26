@@ -1,12 +1,12 @@
 {
   "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
   "format": 1,
-  "name": "13SentinelsRecomp",
-  "repo": "WenVil/13SentinelsRecomp",
+  "name": "YokaiWatch1Recomp",
+  "repo": "YokaiWatch1Recomp",
   "inputs": [
     {
       "id": "game",
-      "label": "Your extracted copy of 13 Sentinels: Aegis Rim (Nintendo Switch): the folder containing exefs/ and romfs/ (Asia v1.00, US/EU v1.10 merged with update, or US/EU v1.00).",
+      "label": "Your extracted copy of Yo-kai Watch 1 (Nintendo Switch JP v1.3.0): the folder containing exefs/main and romfs/yw1_a.fa.",
       "role": "game",
       "formats": [
         {
@@ -20,7 +20,7 @@
   ],
   "start": {
     "program": [
-      "13SentinelsRecomp.exe"
+      "YokaiWatch1Recomp.exe"
     ],
     "args": [
       "--game-dir",
@@ -33,7 +33,7 @@
   },
   "prepare": {
     "program": [
-      "13SentinelsRecomp.exe"
+      "YokaiWatch1Recomp.exe"
     ],
     "args": [
       "--game-dir",
@@ -54,12 +54,12 @@
       "format": "ini",
       "file": [
         {
-          "path": "{data}/13sentinels.ini"
+          "path": "{data}/yokaiwatch1.ini"
         }
       ],
       "game_path": "game_dir",
       "new": {
-        "game_lang": "auto",
+        "game_lang": "ja",
         "background_input": "0"
       }
     }
@@ -86,10 +86,7 @@
   },
   "system": {
     "windows": {
-      "version": "10",
-      "graphics": {
-        "vulkan": "1.3"
-      }
+      "version": "10"
     }
   },
   "groups": [
@@ -691,95 +688,20 @@
       "defaults": {
         "trigger_threshold": "50"
       }
-    },
-    {
-      "id": "vk_wait_pipes",
-      "label": "Wait for shader pipelines",
-      "group": "Advanced",
-      "help": "Waits for pipeline compilation during command recording to avoid missing draws.",
-      "choices": [
-        {
-          "label": "On",
-          "set": {
-            "vk_wait_pipes": "1"
-          }
-        },
-        {
-          "label": "Off",
-          "set": {
-            "vk_wait_pipes": "0"
-          }
-        }
-      ],
-      "defaults": {
-        "vk_wait_pipes": "1"
-      }
-    },
-    {
-      "id": "vk_copy_vertices",
-      "label": "Safe vertex buffer copy",
-      "group": "Advanced",
-      "help": "Copies dynamic vertex and index ranges for safe GPU frame overlap.",
-      "choices": [
-        {
-          "label": "On",
-          "set": {
-            "vk_copy_vertices": "1"
-          }
-        },
-        {
-          "label": "Off",
-          "set": {
-            "vk_copy_vertices": "0"
-          }
-        }
-      ],
-      "defaults": {
-        "vk_copy_vertices": "1"
-      }
-    },
-    {
-      "id": "vk_gpu_overlap",
-      "label": "GPU overlap synchronization",
-      "group": "Advanced",
-      "help": "Overlaps frame fences with write-watch snapshots for higher throughput.",
-      "choices": [
-        {
-          "label": "On",
-          "set": {
-            "vk_gpu_overlap": "1"
-          }
-        },
-        {
-          "label": "Off",
-          "set": {
-            "vk_gpu_overlap": "0"
-          }
-        }
-      ],
-      "defaults": {
-        "vk_gpu_overlap": "1"
-      }
     }
   ],
   "actions": [
     {
       "id": "saves",
       "label": "Saves",
-      "help": "Your Switch save folder (save/save_0/ROBO13.DAT).",
+      "help": "Your Switch save folder (save/save_0/).",
       "open": "saves"
     },
     {
       "id": "logs",
       "label": "Logs",
-      "help": "13sentinelsrecomp.log and recent session backups for bug reports.",
+      "help": "yokaiwatch1recomp.log and recent session backups for bug reports.",
       "open": "logs"
-    },
-    {
-      "id": "cache",
-      "label": "Shader cache",
-      "help": "Pre-warmed Vulkan shaders under cache/. Clearing only helps if graphics look wrong after an update.",
-      "clear": "data/cache"
     }
   ]
 }

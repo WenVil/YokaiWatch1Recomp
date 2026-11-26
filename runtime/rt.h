@@ -99,8 +99,8 @@ int rt_reboot_requested(void);
 extern volatile int g_rt_unwind;   // set while guest threads are being stopped (kernel.c)
 void rt_unwind_point(void);        // guest threads: unwind to thread_main if a reboot is stopping them
 
-// ---- ui (runtime/nvn/metal.m)
-int ui_run(void);  // window loop; returns the reboot kind requested (the window stays open)
+// ---- ui / window loop (runtime/gl/gl_backend.c)
+int gl_backend_run(void);  // window loop; returns the reboot kind requested (the window stays open)
 
 // ---- helpers
 void guest_call(Cpu *c, uint64_t addr);   // call guest function at addr (saves/restores x30)

@@ -1,7 +1,5 @@
-# 13SentinelsRecomp build
-# macOS: Homebrew clang/SDL3/FFmpeg, Metal renderer.
-# Windows: MSYS2 UCRT64 shell (see docs/BUILD-windows.md), clang + Vulkan renderer.
-# Linux: clang + Vulkan renderer, x86-64 or aarch64 (see docs/linux.md).
+# Yo-kai Watch 1 Recompiled build
+# macOS / Linux / Windows: SDL3 + OpenGL 4.5 Compatibility + FFmpeg + OpenGL3 ImGui frontend.
 UNAME := $(shell uname -s)
 comma := ,
 ifneq ($(filter MINGW% MSYS% CYGWIN% Windows_NT,$(UNAME) $(OS)),)
@@ -44,52 +42,47 @@ GENFLAGS := -O1 -fno-strict-aliasing -Wno-return-type -Wno-unused-label -fvisibi
 # true. No comment after the value: make keeps the spaces before it)
 GEN_SRC  := $(strip $(wildcard $(GEN)/main/*.c) $(wildcard $(GEN)/sdk/*.c) $(wildcard $(GEN)/subsdk0/*.c))
 GEN_OBJ  := $(patsubst %.c,$(B)/obj/%.o,$(patsubst $(GEN)/%,%,$(GEN_SRC))) $(B)/obj/tools/gamelib_entry.o
-RT_SRC   := $(wildcard runtime/*.c runtime/*.cpp) $(wildcard runtime/hle/*.c) $(wildcard runtime/gl/*.c) $(wildcard runtime/services/*.c) \
-            $(wildcard runtime/nvn/*.c) $(wildcard runtime/nvn/maxwell/*.c) runtime/platform/$(PLATFORM).c
-RT_HDRS  := $(wildcard runtime/*.h runtime/gl/*.h runtime/game_addresses/*.h) $(wildcard runtime/platform/*.h) $(wildcard runtime/nvn/*.h) \
-            $(wildcard runtime/nvn/maxwell/*.h) $(wildcard runtime/nvn/vulkan/*.h) $(wildcard runtime/ui/*.h)
+RT_SRC   := $(wildcard runtime/*.c runtime/*.cpp) $(wildcard runtime/hle/*.c) $(wildcard runtime/gl/*.c runtime/gl/*.cpp) \
+            $(wildcard runtime/services/*.c) runtime/platform/$(PLATFORM).c
+RT_HDRS  := $(wildcard runtime/*.h runtime/gl/*.h runtime/game_addresses/*.h) $(wildcard runtime/platform/*.h) \
+            $(wildcard runtime/ui/*.h)
 UI_SRC   := $(wildcard runtime/ui/*.mm) $(wildcard runtime/ui/*.cpp)
 UI_OBJ   := $(patsubst runtime/%.cpp,$(B)/rt/%.o,$(patsubst runtime/%.mm,$(B)/rt/%.o,$(UI_SRC)))
 IMGUI_OBJ := $(B)/imgui/imgui.o $(B)/imgui/imgui_draw.o $(B)/imgui/imgui_tables.o $(B)/imgui/imgui_widgets.o \
-             $(B)/imgui/imgui_impl_sdl3.o
+             $(B)/imgui/imgui_impl_sdl3.o $(B)/imgui/imgui_impl_opengl3.o
 
 ifeq ($(PLATFORM),macos)
 SDL      := $(or $(DEPS),/opt/homebrew/opt/sdl3)
 FFMPEG   := $(or $(DEPS),/opt/homebrew/opt/ffmpeg)
-EXE      := $(B)/lasrecomp
+EXE      := $(B)/yokaiwatch1recomp
 DEPINC   := -I$(SDL)/include -I$(FFMPEG)/include
 LDFLAGS  := -L$(SDL)/lib -lSDL3 -Wl,-rpath,$(SDL)/lib -L$(FFMPEG)/lib -lavformat -lavcodec -lavutil -lswscale -Wl,-rpath,$(FFMPEG)/lib \
-            -framework CoreFoundation -framework Foundation -framework Metal -framework MetalFX -framework QuartzCore -framework AppKit -framework ImageIO -framework CoreGraphics -framework UniformTypeIdentifiers
-BACKEND_SRC := $(wildcard runtime/nvn/*.m)
-BACKEND_OBJ := $(patsubst runtime/%.m,$(B)/rt/%.o,$(BACKEND_SRC))
-IMGUI_OBJ += $(B)/imgui/imgui_impl_metal.o
+            -framework CoreFoundation -framework Foundation -framework AppKit -framework OpenGL -framework ImageIO
+BACKEND_SRC :=
+BACKEND_OBJ :=
 UIFLAGS  := -fobjc-arc
-GAMELIB  := $(B)/lasgame.dylib
+GAMELIB  := $(B)/yw1game.dylib
 GAMELIB_LDFLAGS := -dynamiclib -undefined dynamic_lookup  # (the runtime functions it calls: the app's own)
 GAMELIB_SHARED := -shared -Wl,-undefined,dynamic_lookup  # (the same, for the start screen's build: zig cc)
 else ifeq ($(PLATFORM),linux)
-EXE      := $(B)/lasrecomp
+EXE      := $(B)/yokaiwatch1recomp
 DEPINC   := $(if $(DEPS),-I$(DEPS)/include)
 ifeq ($(ARCH),x86_64)
 GENARCH  ?= -march=x86-64-v3  # as on Windows: AVX2 + FMA for the lifted FP/SIMD code (checked at startup)
 endif
 GENFLAGS += $(GENARCH) -fPIC
 OSFLAGS  := -Wno-format  # (%llx for uint64_t, which is unsigned long here: the same size)
-# shaderc as the system's pkg-config file names it (Arch / Fedora / AOSC ship only libshaderc_shared, issue #22);
-# without one -lshaderc (Debian / Ubuntu's libshaderc.so). SHADERC=... overrides it.
-SHADERC  ?= $(shell pkg-config --libs shaderc 2>/dev/null || echo -lshaderc)
 # -rdynamic: crash backtraces name host functions (runtime/platform/linux.c)
 LDFLAGS  := -fuse-ld=lld -rdynamic $(if $(DEPS),-L$(DEPS)/lib) -lSDL3 -lavformat -lavcodec -lavutil -lswscale \
-            -lvulkan $(SHADERC) -lpthread -ldl -lm
-BACKEND_SRC := $(wildcard runtime/nvn/vulkan/*.c) $(wildcard runtime/nvn/vulkan/*.cpp)
-BACKEND_OBJ := $(patsubst runtime/%.cpp,$(B)/rt/%.o,$(patsubst runtime/%.c,$(B)/rt/%.o,$(BACKEND_SRC)))
-IMGUI_OBJ += $(B)/imgui/imgui_impl_vulkan.o
+            -lGL -lpthread -ldl -lm
+BACKEND_SRC :=
+BACKEND_OBJ :=
 UIFLAGS  := -x c++  # the .mm UI sources are plain C++ apart from __APPLE__ blocks
-GAMELIB  := $(B)/lasgame.so
+GAMELIB  := $(B)/yw1game.so
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld  # (the runtime functions it calls: the app's own, -rdynamic)
 GAMELIB_SHARED := -shared
 else
-EXE      := $(B)/13SentinelsRecomp.exe
+EXE      := $(B)/YokaiWatch1Recomp.exe
 COMPAT_EXE := $(B)/lasrecomp.exe
 DEPINC   := $(if $(DEPS),-I$(DEPS)/include)
 OSFLAGS  := -D_FILE_OFFSET_BITS=64 -D_POSIX_THREAD_SAFE_FUNCTIONS -D_CRT_RAND_S -DWIN32_LEAN_AND_MEAN -DNOMINMAX \
@@ -97,25 +90,23 @@ OSFLAGS  := -D_FILE_OFFSET_BITS=64 -D_POSIX_THREAD_SAFE_FUNCTIONS -D_CRT_RAND_S 
 GENARCH  ?= -march=x86-64-v3  # AVX2 + FMA for the lifted FP/SIMD code (simd.h); override for older CPUs
 GENFLAGS += -D_FILE_OFFSET_BITS=64 $(GENARCH)
 LDFLAGS  := -fuse-ld=lld -Wl,--stack,16777216 $(if $(DEPS),-L$(DEPS)/lib) -lSDL3 -lavformat -lavcodec -lavutil -lswscale \
-            -lvulkan-1 -lws2_32 -lwinmm -lole32 -lshell32 -lcomdlg32 -luuid -lshaderc_shared \
-            $(if $(RELEASE),-Wl$(comma)--subsystem$(comma)windows -Wl$(comma)--strip-debug)  # release: no console window (log -> 13sentinelsrecomp.log + 13sentinelsrecomp-backup-*.log), no debug info
-BACKEND_SRC := $(wildcard runtime/nvn/vulkan/*.c) $(wildcard runtime/nvn/vulkan/*.cpp)
-BACKEND_OBJ := $(patsubst runtime/%.cpp,$(B)/rt/%.o,$(patsubst runtime/%.c,$(B)/rt/%.o,$(BACKEND_SRC)))
-BACKEND_OBJ += $(B)/rt/platform/windows_rc.o  # the .exe's icon (Explorer, taskbar)
+            -lopengl32 -lws2_32 -lwinmm -lole32 -lshell32 -lcomdlg32 -luuid \
+            $(if $(RELEASE),-Wl$(comma)--subsystem$(comma)windows -Wl$(comma)--strip-debug)  # release: no console window (log -> yokaiwatch1recomp.log), no debug info
+BACKEND_SRC :=
+BACKEND_OBJ := $(B)/rt/platform/windows_rc.o  # the .exe's icon (Explorer, taskbar)
 WINDRES  ?= windres
-IMGUI_OBJ += $(B)/imgui/imgui_impl_vulkan.o
 UIFLAGS  := -x c++ $(OSFLAGS)  # the .mm UI sources are plain C++ apart from __APPLE__ blocks
-GAMELIB  := $(B)/lasgame.dll
+GAMELIB  := $(B)/yw1game.dll
 # the runtime functions it calls: exported by the .exe, linked through its import library
-LDFLAGS  += -Wl,--export-all-symbols -Wl,--out-implib,$(B)/13SentinelsRecomp.dll.a
-GAMELIB_LDFLAGS := -shared -fuse-ld=lld $(B)/13SentinelsRecomp.dll.a
+LDFLAGS  += -Wl,--export-all-symbols -Wl,--out-implib,$(B)/YokaiWatch1Recomp.dll.a
+GAMELIB_LDFLAGS := -shared -fuse-ld=lld $(B)/YokaiWatch1Recomp.dll.a
 GAMELIB_SHARED := -shared  # (+ the import library: runtime/gamebuild.c)
 endif
 
 # GAMELIB_ID: what the game code library is built from (the generator, the headers it is compiled against, the
 # flags). A library with another id is rebuilt by the start screen, never loaded.
-GAMELIB_SRCS := tools/game_addresses.py runtime/game_addresses/versions.h $(wildcard runtime/game_addresses/patches_v*.h) tools/gen.py tools/lifter.py tools/analyze.py tools/nso.py tools/passes.py tools/patches.py \
-                tools/simd_c.py tools/rando/patch_variants.json tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
+GAMELIB_SRCS := tools/game_addresses.py runtime/game_addresses/versions.h tools/gen.py tools/lifter.py tools/analyze.py \
+                tools/nso.py tools/passes.py tools/simd_c.py tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
                 runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16)
 # The library's own id adds the game's main build ID (what `make gen` generated from: $(GEN)/main/main_build_id.txt),
@@ -132,8 +123,8 @@ GAMELIB_BASE_ID := $(shell (cat $(GAMELIB_BASE_SRCS); echo '$(GENFLAGS) $(GAMELI
 RT_OBJ   := $(patsubst runtime/%.cpp,$(B)/rt/%.o,$(patsubst runtime/%.c,$(B)/rt/%.o,$(RT_SRC)))
 # no path of this machine in what ships: debug info and __FILE__ name the checkout as "." (Windows: its C:/ form too)
 PATHMAP  := -ffile-prefix-map=$(CURDIR)=. $(if $(filter windows,$(PLATFORM)),-ffile-prefix-map=$(shell cygpath -m '$(CURDIR)')=.)
-RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -finput-charset=UTF-8 -fexec-charset=UTF-8 -Iruntime -Iruntime/nvn $(DEPINC) $(OSFLAGS) $(PATHMAP)
-CXXFLAGS := -O2 -g -std=c++17 -finput-charset=UTF-8 -fexec-charset=UTF-8 -I$(IMGUI) -I$(IMGUI)/backends -Iruntime -Iruntime/nvn $(DEPINC) $(PATHMAP)
+RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -finput-charset=UTF-8 -fexec-charset=UTF-8 -Iruntime $(DEPINC) $(OSFLAGS) $(PATHMAP)
+CXXFLAGS := -O2 -g -std=c++17 -finput-charset=UTF-8 -fexec-charset=UTF-8 -I$(IMGUI) -I$(IMGUI)/backends -Iruntime $(DEPINC) $(PATHMAP)
 
 all: $(EXE) $(if $(and $(filter windows,$(PLATFORM)),$(if $(RELEASE),,1)),$(COMPAT_EXE)) $(if $(GEN_SRC),$(GAMELIB))
 
@@ -159,28 +150,6 @@ $(B)/rt/gamebuild.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"' -DGAMELIB_BASE_ID
 $(B)/rt/%.o: runtime/%.c $(RT_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(RTFLAGS) -c $< -o $@
-
-# SMAA (third_party/smaa, MIT): the reference shader as a C string for runtime/nvn/smaa_data.c (both backends build
-# their passes from it); the non-ASCII bytes in its comments become '?', and its CRLF line ends plain LF (a CR left in
-# the string literals ends them early on macOS clang)
-$(B)/inc/smaa_hlsl.inc: third_party/smaa/SMAA.hlsl
-	@mkdir -p $(dir $@)
-	LC_ALL=C tr -d '\r' < $< | LC_ALL=C tr '\200-\377' '?' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/' > $@
-$(B)/rt/nvn/smaa_data.o: $(B)/inc/smaa_hlsl.inc
-$(B)/rt/nvn/smaa_data.o: RTFLAGS += -I$(B)/inc -Ithird_party/smaa/Textures
-
-# The shader preparation's variant list (runtime/nvn/shader_prep.h: no shader code, hashes and pipeline state only)
-# as a C string for runtime/nvn/shader_prep.c
-$(B)/inc/shader_variants.inc: runtime/nvn/shader_variants.txt
-	@mkdir -p $(dir $@)
-	(LC_ALL=C tr -d '\r' < $< | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/'; echo '""') > $@
-$(B)/rt/nvn/shader_prep.o: $(B)/inc/shader_variants.inc
-$(B)/rt/nvn/shader_prep.o: RTFLAGS += -I$(B)/inc
-# the shader translator's id: part of the shader caches' tag (shader_cache_tag), so a changed translator rebuilds them
-TRANSLATOR_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
-TRANSLATOR_ID := $(shell cat $(TRANSLATOR_SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-12)
-$(B)/rt/nvn/shader_prep.o: $(TRANSLATOR_SRCS)
-$(B)/rt/nvn/shader_prep.o: RTFLAGS += -DSHADER_TRANSLATOR_ID='"$(TRANSLATOR_ID)"'
 
 $(B)/rt/%.o: runtime/%.cpp $(RT_HDRS)
 	@mkdir -p $(dir $@)
@@ -216,17 +185,13 @@ $(B)/imgui/imgui_impl_%.o: $(IMGUI)/backends/imgui_impl_%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(B)/imgui/imgui_impl_metal.o: $(IMGUI)/backends/imgui_impl_metal.mm
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -fobjc-arc -c $< -o $@
-
 # Python: tools/venv (macOS, Linux: bin/python, Windows: Scripts/python.exe)
 PY := $(firstword $(wildcard tools/venv/bin/python) $(wildcard tools/venv/Scripts/python.exe))
 EXEFS ?= extracted/exefs
 
 gen:
-	cd tools && ../$(PY) gen.py sdk "$(abspath $(EXEFS))/sdk" 0x7004000000 "$(abspath $(GEN))/sdk" --hle ../runtime/hle/hle_symbols.txt $(GENSIMD)
-	cd tools && ../$(PY) gen.py main "$(abspath $(EXEFS))/main" 0x7000000000 "$(abspath $(GEN))/main" $(GENSIMD)
+	cd tools && ../$(PY) gen.py sdk "$(abspath $(EXEFS))/sdk" 0x7004000000 "$(abspath $(GEN))/sdk" --hle ../runtime/hle/hle_symbols.txt $(GENSIMD) --generic
+	cd tools && ../$(PY) gen.py main "$(abspath $(EXEFS))/main" 0x7000000000 "$(abspath $(GEN))/main" $(GENSIMD) --generic
 
 gen-objs: $(GEN_OBJ)
 
@@ -239,33 +204,19 @@ $(B)/rt/platform/windows_rc.o: runtime/platform/windows.rc docs/icon/icon.ico ru
 
 VERSION  := $(shell sed -n 's/^\#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
 
-# macOS: build/LAS Recomp.app, runs on macOS $(APP_MIN)+: the game rebuilt for that in build/mac15 against build/deps
-# (`make deps`: SDL3, LGPL FFmpeg, keystone, Python, from pinned sources), the generator helper when built
-# (`make rando-helper` after `make deps`), packaged by tools/bundle_macos.sh. No game files or fonts.
 APP_MIN  := 15.0
 APP_B    := build/mac15
 deps:
 	MACOS_MIN=$(APP_MIN) tools/build_deps_macos.sh
 app:
 	@[ -f build/deps/lib/libSDL3.0.dylib ] || { echo "make deps first"; exit 1; }
-	$(MAKE) B=$(APP_B) MACOS_MIN=$(APP_MIN) DEPS=$(CURDIR)/build/deps $(APP_B)/lasrecomp
-	MACOS_MIN=$(APP_MIN) tools/bundle_macos.sh $(APP_B)/lasrecomp
+	$(MAKE) B=$(APP_B) MACOS_MIN=$(APP_MIN) DEPS=$(CURDIR)/build/deps $(APP_B)/yokaiwatch1recomp
+	MACOS_MIN=$(APP_MIN) tools/bundle_macos.sh $(APP_B)/yokaiwatch1recomp
 
-# macOS release disk image (the .app + an Applications shortcut to drag it onto): build/dist/LAS Recomp-<v>-macOS.dmg
 dmg: app
 	tools/make_dmg.sh
 
-# Windows: build/dist/13SentinelsRecomp-<version>-windows.zip, top folder "13SentinelsRecomp/": the exe,
-# the game code generator helper (make gen-helper), bundled compiler (tools/fetch_zig.sh slimmed by
-# tools/zig_slim.sh: its runtime built ahead of time, gamelib-src/, the exe's import library)
-# and the DLLs they load (runs without MSYS2). No game code. The exe is a release build in $(WIN_B):
-# linked against the LGPL FFmpeg from `make deps-windows` (MSYS2's is a GPLv3 build) and without a console window
-# (RELEASE=1: the log goes next to the exe - 13sentinelsrecomp.log is the latest run, plus up to five recent
-# 13sentinelsrecomp-backup-*.log - and fatal errors show a message box). Its DLLs are looked up
-# with build/deps-win/bin first (the FFmpeg DLL names are the same as MSYS2's GPL ones). vulkan-1.dll is left
-# out: every Vulkan driver installs the loader in System32. Saves and builds go next to the exe at run time.
-# Needs: Windows 10+ x64, a Vulkan 1.3 driver, an AVX2 CPU (GENARCH x86-64-v3; checked at startup).
-DIST     := build/dist/13SentinelsRecomp
+DIST     := build/dist/YokaiWatch1Recomp
 WIN_B    := build/win-release
 deps-windows:
 	tools/build_deps_windows.sh
@@ -273,10 +224,10 @@ dist:
 	@[ -f build/deps-win/lib/libavcodec.dll.a ] || { echo "make deps-windows first (LGPL FFmpeg)"; exit 1; }
 	@[ -d build/helper/lasgen ] || { echo "make gen-helper first (the game code generator)"; exit 1; }
 	@[ -x build/zig/zig.exe ] || { echo "tools/fetch_zig.sh first (the compiler)"; exit 1; }
-	$(MAKE) B=$(WIN_B) DEPS=$(CURDIR)/build/deps-win RELEASE=1 $(WIN_B)/13SentinelsRecomp.exe
-	! nm $(WIN_B)/13SentinelsRecomp.exe | grep ' f_70' >/dev/null  # (no game code inside)
+	$(MAKE) B=$(WIN_B) DEPS=$(CURDIR)/build/deps-win RELEASE=1 $(WIN_B)/YokaiWatch1Recomp.exe
+	! nm $(WIN_B)/YokaiWatch1Recomp.exe | grep ' f_70' >/dev/null  # (no game code inside)
 	rm -rf build/dist && mkdir -p "$(DIST)/gamelib-src"
-	cp $(WIN_B)/13SentinelsRecomp.exe $(WIN_B)/13SentinelsRecomp.dll.a "$(DIST)/"
+	cp $(WIN_B)/YokaiWatch1Recomp.exe $(WIN_B)/YokaiWatch1Recomp.dll.a "$(DIST)/"
 	tools/zig_slim.sh $(strip $(filter-out -Iruntime,$(GENFLAGS)))  # (zig with its runtime built ahead of time)
 	cp -R build/helper/lasgen "$(DIST)/"
 	cp -R build/zig-slim "$(DIST)/zig"
@@ -290,17 +241,16 @@ dist:
 	    cp third_party/fonts/DejaVu/DejaVuSans.ttf third_party/fonts/DejaVu/DejaVuSans-Bold.ttf "$(DIST)/"; \
 	    cp third_party/fonts/DejaVu/LICENSE "$(DIST)/DejaVu-LICENSE.txt"; fi
 	cp README.md LICENSE THIRD_PARTY_LICENSES.md recomplauncher.json "$(DIST)/"  # (licenses and launcher metadata)
-	PATH="$(CURDIR)/build/deps-win/bin:$$PATH" ldd $(WIN_B)/13SentinelsRecomp.exe | awk '(/ucrt64/ || /deps-win/) && !/vulkan-1/ {print $$3}' | sort -u | \
+	PATH="$(CURDIR)/build/deps-win/bin:$$PATH" ldd $(WIN_B)/YokaiWatch1Recomp.exe | awk '(/ucrt64/ || /deps-win/) {print $$3}' | sort -u | \
 	    xargs -I{} cp -u {} "$(DIST)/"
 	! ls "$(DIST)" | grep -iE 'x264|x265|xvid|postproc'  # (no GPL codec libraries in the release)
-	# (no path of this machine inside: build/deps-win, debug info, zig's runtime. Not on CI: its paths name no one)
 	if [ "$${CI:-}" != true ]; then \
 	    case "$$(basename "$$(cygpath -u "$$USERPROFILE")")" in runner|runneradmin) h= ;; *) h=$$(cygpath -m "$$USERPROFILE") ;; esac; \
 	    ! grep -rlaiF -e "$(CURDIR)" -e "$$(cygpath -m '$(CURDIR)')" -e "$$(cygpath -w '$(CURDIR)')" \
 	        $${h:+-e "$$h" -e "$$(cygpath -w "$$h")"} "$(DIST)"; fi
-	cd build/dist && if command -v zip >/dev/null; then zip -qr "13SentinelsRecomp-$(VERSION)-windows.zip" "13SentinelsRecomp"; \
-	    else /c/Windows/System32/tar.exe -a -cf "13SentinelsRecomp-$(VERSION)-windows.zip" "13SentinelsRecomp"; fi
-	@echo "build/dist/13SentinelsRecomp-$(VERSION)-windows.zip"
+	cd build/dist && if command -v zip >/dev/null; then zip -qr "YokaiWatch1Recomp-$(VERSION)-windows.zip" "YokaiWatch1Recomp"; \
+	    else /c/Windows/System32/tar.exe -a -cf "YokaiWatch1Recomp-$(VERSION)-windows.zip" "YokaiWatch1Recomp"; fi
+	@echo "build/dist/YokaiWatch1Recomp-$(VERSION)-windows.zip"
 
 # Seed generator as a standalone helper, so players need no Python: build/helper/rando-gen/ (rando-gen[.exe] +
 # _internal/), frozen by PyInstaller from tools/rando/rando_gen.spec in its own venv (build/rando-venv). Ship the
@@ -358,6 +308,3 @@ smoketest:
 	tools/linux/smoketest.sh
 
 .PHONY: dmg all gen gen-helper gen-objs runtime-objs deps deps-windows app dist rando-helper appimage appimages smoketest
-
-build/test_shaders: tools/test_shaders.m runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
-	clang -O1 -fobjc-arc -framework Metal -framework Foundation -o $@ tools/test_shaders.m runtime/nvn/maxwell/translate.c

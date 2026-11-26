@@ -8,11 +8,13 @@
 
 #include "../cpu.h"
 #include "../hle.h"
-#include "../nvn/astc.h"
+#include "astc.h"
 #include "../platform.h"
 #include "../rt.h"
+#include "../settings.h"
 #include "../simd.h"
 #include "gl_backend.h"
+#include "gl_imgui.h"
 
 extern void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out, uint64_t *am_cmds_out,
                               char *svcs_buf, size_t svcs_cap);
@@ -512,7 +514,7 @@ static void record_viewport_stat(GLsizei w, GLsizei h) {
 // Letterbox rect on host window for touch coordinate conversion
 static int g_vp_x = 0, g_vp_y = 0, g_vp_w = 1280, g_vp_h = 720, g_win_w = 1280, g_win_h = 720;
 
-// Lifetime glGetError telemetry
+// Lifetime glGetError & draw telemetry
 static struct {
     GLenum code;
     uint64_t count;
@@ -521,6 +523,10 @@ static struct {
 } g_gl_err_stats[16];
 static int g_gl_err_kind_n;
 static uint64_t g_gl_err_total;
+static uint64_t g_total_draws;
+static char g_gl_vendor[128];
+static char g_gl_renderer[128];
+static char g_gl_version[128];
 
 // eglGetProcAddress telemetry
 static uint32_t g_epa_hits;
@@ -548,6 +554,7 @@ RT_ON_RESET(gl_hle_reset) {
     memset(g_gl_err_stats, 0, sizeof g_gl_err_stats);
     g_gl_err_kind_n = 0;
     g_gl_err_total = 0;
+    __atomic_store_n(&g_total_draws, 0, __ATOMIC_RELAXED);
     g_epa_hits = g_epa_misses = 0;
     pthread_mutex_unlock(&g_gl_lock);
 }
@@ -563,6 +570,9 @@ void gl_hle_init_procs(void) {
         const char *ren = (const char *)g_gl.p_glGetString(GL_RENDERER);
         const char *ver = (const char *)g_gl.p_glGetString(GL_VERSION);
         const char *glsl = (const char *)g_gl.p_glGetString(GL_SHADING_LANGUAGE_VERSION);
+        snprintf(g_gl_vendor, sizeof g_gl_vendor, "%s", ven ? ven : "OpenGL");
+        snprintf(g_gl_renderer, sizeof g_gl_renderer, "%s", ren ? ren : "OpenGL 4.5");
+        snprintf(g_gl_version, sizeof g_gl_version, "%s", ver ? ver : "4.5");
         LOG("[gl] host driver: vendor=\"%s\" renderer=\"%s\" version=\"%s\" glsl=\"%s\"\n",
             ven ? ven : "(null)", ren ? ren : "(null)", ver ? ver : "(null)", glsl ? glsl : "(null)");
     }
@@ -627,14 +637,16 @@ void gl_hle_blit_virtual_fbo(int win_w, int win_h) {
         return;
     }
 
-    int dst_w = win_w;
-    int dst_h = (win_w * VFBO_H + VFBO_W / 2) / VFBO_W;
-    if (dst_h > win_h) {
-        dst_h = win_h;
-        dst_w = (win_h * VFBO_W + VFBO_H / 2) / VFBO_H;
+    int dst_x = 0, dst_y = 0, dst_w = win_w, dst_h = win_h;
+    if (g_settings.aspect_mode != ASPECT_MODE_STRETCH) {
+        dst_h = (win_w * VFBO_H + VFBO_W / 2) / VFBO_W;
+        if (dst_h > win_h) {
+            dst_h = win_h;
+            dst_w = (win_h * VFBO_W + VFBO_H / 2) / VFBO_H;
+        }
+        dst_x = (win_w - dst_w) / 2;
+        dst_y = (win_h - dst_h) / 2;
     }
-    int dst_x = (win_w - dst_w) / 2;
-    int dst_y = (win_h - dst_h) / 2;
 
     pthread_mutex_lock(&g_gl_lock);
     g_vp_x = dst_x;
@@ -694,34 +706,57 @@ void gl_hle_get_viewport_rect(int *vx, int *vy, int *vw, int *vh, int *ww, int *
     pthread_mutex_unlock(&g_gl_lock);
 }
 
+void gl_hle_record_gl_error(unsigned err_code, uint64_t frame_num) {
+    GLenum err = (GLenum)err_code;
+    if (err == GL_NO_ERROR) return;
+    pthread_mutex_lock(&g_gl_lock);
+    g_gl_err_total++;
+    int idx = -1;
+    for (int j = 0; j < g_gl_err_kind_n; j++) {
+        if (g_gl_err_stats[j].code == err) { idx = j; break; }
+    }
+    if (idx < 0 && g_gl_err_kind_n < 16) {
+        idx = g_gl_err_kind_n++;
+        g_gl_err_stats[idx].code = err;
+        g_gl_err_stats[idx].first_frame = frame_num;
+    }
+    uint64_t occ = 0;
+    if (idx >= 0) {
+        g_gl_err_stats[idx].count++;
+        g_gl_err_stats[idx].last_frame = frame_num;
+        occ = g_gl_err_stats[idx].count;
+    }
+    pthread_mutex_unlock(&g_gl_lock);
+    if (occ <= 5) {
+        LOG("[gl] frame %llu glGetError() = 0x%04x (occ=%llu)\n",
+            (unsigned long long)frame_num, (unsigned)err, (unsigned long long)occ);
+    }
+}
+
 void gl_hle_check_post_swap_errors(uint64_t frame_num) {
     if (!g_gl.p_glGetError) return;
     for (int i = 0; i < 8; i++) {
         GLenum err = g_gl.p_glGetError();
         if (err == GL_NO_ERROR) break;
-        pthread_mutex_lock(&g_gl_lock);
-        g_gl_err_total++;
-        int idx = -1;
-        for (int j = 0; j < g_gl_err_kind_n; j++) {
-            if (g_gl_err_stats[j].code == err) { idx = j; break; }
-        }
-        if (idx < 0 && g_gl_err_kind_n < 16) {
-            idx = g_gl_err_kind_n++;
-            g_gl_err_stats[idx].code = err;
-            g_gl_err_stats[idx].first_frame = frame_num;
-        }
-        uint64_t occ = 0;
-        if (idx >= 0) {
-            g_gl_err_stats[idx].count++;
-            g_gl_err_stats[idx].last_frame = frame_num;
-            occ = g_gl_err_stats[idx].count;
-        }
-        pthread_mutex_unlock(&g_gl_lock);
-        if (occ <= 5) {
-            LOG("[gl] frame %llu glGetError() = 0x%04x (occ=%llu)\n",
-                (unsigned long long)frame_num, (unsigned)err, (unsigned long long)occ);
-        }
+        gl_hle_record_gl_error((unsigned)err, frame_num);
     }
+}
+
+void gl_hle_get_stats(uint64_t *draws_out, uint64_t *gl_errs_out, int *shaders_ok_out, int *shaders_fail_out) {
+    if (draws_out) *draws_out = __atomic_load_n(&g_total_draws, __ATOMIC_RELAXED);
+    pthread_mutex_lock(&g_gl_lock);
+    if (gl_errs_out) *gl_errs_out = g_gl_err_total + gl_imgui_gl_error_count();
+    if (shaders_ok_out) *shaders_ok_out = g_shader_ok;
+    if (shaders_fail_out) *shaders_fail_out = g_shader_fail;
+    pthread_mutex_unlock(&g_gl_lock);
+}
+
+void gl_hle_get_renderer_strings(const char **vendor_out, const char **renderer_out, const char **version_out) {
+    pthread_mutex_lock(&g_gl_lock);
+    if (vendor_out) *vendor_out = g_gl_vendor[0] ? g_gl_vendor : "OpenGL";
+    if (renderer_out) *renderer_out = g_gl_renderer[0] ? g_gl_renderer : "OpenGL 4.5";
+    if (version_out) *version_out = g_gl_version[0] ? g_gl_version : "4.5";
+    pthread_mutex_unlock(&g_gl_lock);
 }
 
 void gl_hle_read_virtual_fbo_rgb(int w, int h, uint8_t *bgr_out) {
@@ -1063,7 +1098,10 @@ static void hle_glDepthFunc(Cpu *c) { g_gl.p_glDepthFunc(U32(0)); }
 static void hle_glDepthMask(Cpu *c) { g_gl.p_glDepthMask(U8(0)); }
 static void hle_glDisable(Cpu *c) { g_gl.p_glDisable(U32(0)); }
 static void hle_glDisableVertexAttribArray(Cpu *c) { g_gl.p_glDisableVertexAttribArray(U32(0)); }
-static void hle_glDrawArrays(Cpu *c) { g_gl.p_glDrawArrays(U32(0), I32(1), I32(2)); }
+static void hle_glDrawArrays(Cpu *c) {
+    __atomic_fetch_add(&g_total_draws, 1, __ATOMIC_RELAXED);
+    g_gl.p_glDrawArrays(U32(0), I32(1), I32(2));
+}
 static void hle_glDrawBuffer(Cpu *c) {
     if (g_gl.p_glDrawBuffer) g_gl.p_glDrawBuffer(rewrite_default_fbo_buf(U32(0), true));
 }
@@ -1082,7 +1120,10 @@ static void hle_glDrawBuffers(Cpu *c) {
     }
     g_gl.p_glDrawBuffers(n, bufs);
 }
-static void hle_glDrawElements(Cpu *c) { g_gl.p_glDrawElements(U32(0), I32(1), U32(2), CPTR(3)); }
+static void hle_glDrawElements(Cpu *c) {
+    __atomic_fetch_add(&g_total_draws, 1, __ATOMIC_RELAXED);
+    g_gl.p_glDrawElements(U32(0), I32(1), U32(2), CPTR(3));
+}
 static void hle_glEnable(Cpu *c) { g_gl.p_glEnable(U32(0)); }
 static void hle_glEnableVertexAttribArray(Cpu *c) { g_gl.p_glEnableVertexAttribArray(U32(0)); }
 static void hle_glFinish(Cpu *c) { (void)c; g_gl.p_glFinish(); }

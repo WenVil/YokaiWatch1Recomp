@@ -1,7 +1,6 @@
 // The .exe's icon (Makefile: windres -I docs/icon). ID 1: Explorer and the taskbar use the first icon resource.
 1 ICON "icon.ico"
-// The application manifest (RT_MANIFEST 24, ID 1): UTF-8 as the process code page - a game files folder, or
-// 13SentinelsRecomp's own folder, named with non-ASCII characters wasn't found
+// The application manifest (RT_MANIFEST 24, ID 1): UTF-8 as the process code page
 1 24 "windows.manifest"
 
 1 VERSIONINFO
@@ -17,13 +16,13 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName",      "13SentinelsRecomp Contributors"
-            VALUE "FileDescription",  "13SentinelsRecomp - Static Recompilation Runtime"
+            VALUE "CompanyName",      "Yo-kai Watch 1 Recompiled Contributors"
+            VALUE "FileDescription",  "Yo-kai Watch 1 Recompiled - Static Recompilation Runtime"
             VALUE "FileVersion",      "1.0.0-beta1"
-            VALUE "InternalName",     "13SentinelsRecomp"
+            VALUE "InternalName",     "YokaiWatch1Recomp"
             VALUE "LegalCopyright",   "MIT License - User-supplied game assets required"
-            VALUE "OriginalFilename", "13SentinelsRecomp.exe"
-            VALUE "ProductName",      "13SentinelsRecomp"
+            VALUE "OriginalFilename", "YokaiWatch1Recomp.exe"
+            VALUE "ProductName",      "Yo-kai Watch 1 Recompiled"
             VALUE "ProductVersion",   "1.0.0-beta1"
         END
     END

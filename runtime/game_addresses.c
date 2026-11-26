@@ -8,29 +8,7 @@
 #include "paths.h"
 #include "rt.h"
 
-#define GA_ADDR(name, value) .name = UINT64_C(value),
-static const GameAddrs ga_v1_0_0 = {
-#include "game_addresses/patches_v1_0_0.h"
-#include "game_addresses/runtime_v1_0_0.h"
-};
-static const GameAddrs ga_v1_0_1 = {
-#include "game_addresses/patches_v1_0_1.h"
-#include "game_addresses/runtime_v1_0_1.h"
-};
-static const GameAddrs ga_v13_asia_v1_0_0 = {
-#include "game_addresses/patches_v1_0_0.h"
-#include "game_addresses/runtime_v1_0_0.h"
-};
-static const GameAddrs ga_v13_us_v1_0_0 = {
-#include "game_addresses/patches_v1_0_0.h"
-#include "game_addresses/runtime_v1_0_0.h"
-};
-static const GameAddrs ga_v13_us_v1_1_0 = {
-#include "game_addresses/patches_v1_0_0.h"
-#include "game_addresses/runtime_v1_0_0.h"
-};
 static const GameAddrs ga_vyw1_jp_v1_3_0 = {0};
-#undef GA_ADDR
 
 static const GameVersion versions[] = {
 #define GA_VERSION(key, label, build_id) {#key, label, build_id, &ga_##key},
@@ -107,33 +85,21 @@ bool game_version_select(const char *game_dir, char *why, size_t why_size) {
 const GameVersion *game_version(void) { return g_version; }
 
 uint64_t game_romfs_bytes(const GameVersion *v) {
-    if (!v) return 0;
-    if (!strcmp(v->key, "v1_0_0")) return 6232003695ull;
-    if (!strcmp(v->key, "v1_0_1")) return 6232003903ull;  // (1.0.1 and 1.1.0 have the same RomFS)
+    (void)v;
     return 0;
 }
 
-static const struct { uint64_t hash; uint8_t versions; } romfs_files[] = {
-#include "game_addresses/romfs_files.h"
-};
-enum { ROMFS_ENTRIES = sizeof romfs_files / sizeof *romfs_files };
-struct GameRomfsCheck {
-    uint8_t version;              // romfs_files' bit for the version
-    uint8_t seen[ROMFS_ENTRIES];  // (a file can be passed once: a folder has one file of a name)
-};
+struct GameRomfsCheck { int unused; };
 
 GameRomfsCheck *game_romfs_check_begin(const GameVersion *v) {
-    uint8_t bit = !v ? 0 : !strcmp(v->key, "v1_0_0") ? 1 : !strcmp(v->key, "v1_0_1") ? 2 : 0;
-    if (!bit) return NULL;
-    GameRomfsCheck *c = calloc(1, sizeof *c);
-    if (c) c->version = bit;
-    return c;
+    (void)v;
+    return NULL;
 }
 
 uint64_t game_romfs_hash(const char *rel, uint64_t size) {
     char digits[24];
     snprintf(digits, sizeof digits, "%llu", (unsigned long long)size);
-    uint64_t h = 0xcbf29ce484222325ull;  // FNV-1a 64 of "<rel>\0<size>", as tools/romfs_files.py
+    uint64_t h = 0xcbf29ce484222325ull;
     for (const unsigned char *p = (const unsigned char *)rel; ; p++) {
         h = (h ^ *p) * 0x100000001b3ull;
         if (!*p) break;
@@ -143,25 +109,13 @@ uint64_t game_romfs_hash(const char *rel, uint64_t size) {
 }
 
 bool game_romfs_check_file(GameRomfsCheck *c, const char *rel, uint64_t size) {
-    if (!c) return true;
-    uint64_t h = game_romfs_hash(rel, size);
-    size_t lo = 0, hi = ROMFS_ENTRIES;
-    while (lo < hi) {
-        size_t mid = (lo + hi) / 2;
-        if (romfs_files[mid].hash < h) lo = mid + 1;
-        else hi = mid;
-    }
-    if (lo == ROMFS_ENTRIES || romfs_files[lo].hash != h || !(romfs_files[lo].versions & c->version)) return false;
-    c->seen[lo] = 1;
+    (void)c; (void)rel; (void)size;
     return true;
 }
 
 int game_romfs_check_end(GameRomfsCheck *c) {
-    if (!c) return 0;
-    int missing = 0;
-    for (size_t i = 0; i < ROMFS_ENTRIES; i++) missing += (romfs_files[i].versions & c->version) && !c->seen[i];
     free(c);
-    return missing;
+    return 0;
 }
 
 bool game_romfs_exefs_copy(const char *game_dir, const char *rel, uint64_t size) {

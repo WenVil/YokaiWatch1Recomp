@@ -368,6 +368,8 @@ static int verify_font_coverage(ImFont *font, const char *extra_text) {
 
 }  // namespace
 
+static int g_font_last_missing_cnt = 0;
+
 void ui_load_i18n_fonts(ImFont **out_small, ImFont **out_menu, ImFont **out_big,
                         float sz_small, float sz_menu, float sz_big,
                         int ui_lang, const char *extra_text, const char *env_override) {
@@ -444,6 +446,7 @@ void ui_load_i18n_fonts(ImFont **out_small, ImFont **out_menu, ImFont **out_big,
 
     io.Fonts->Build();
     int miss_cnt = verify_font_coverage(f_small, extra_text);
+    g_font_last_missing_cnt = miss_cnt;
     fprintf(stderr, "[ui-font] lang=%s atlas=%dx%d glyphs=%d pieces=%zu primary=%s missing=%d\n",
             ui_i18n_lang_name(ui_lang), io.Fonts->TexWidth, io.Fonts->TexHeight,
             f_small->Glyphs.Size, pieces.size(),
@@ -453,6 +456,8 @@ void ui_load_i18n_fonts(ImFont **out_small, ImFont **out_menu, ImFont **out_big,
     if (out_menu) *out_menu = f_menu;
     if (out_big) *out_big = f_big;
 }
+
+int ui_font_last_missing_count(void) { return g_font_last_missing_cnt; }
 
 void ui_load_cjk_fonts(ImFont **out_small, ImFont **out_menu, ImFont **out_big,
                        float sz_small, float sz_menu, float sz_big,
@@ -470,7 +475,7 @@ bool ui_font_text_missing(ImFont *font, const char *utf8) {
     return miss;
 }
 
-void ui_apply_sentinel_theme(float style_scale) {
+void ui_apply_yw1_theme(float style_scale) {
     ImGuiStyle &st = ImGui::GetStyle();
     st = ImGuiStyle();
     ImGui::StyleColorsDark();

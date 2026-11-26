@@ -260,10 +260,4 @@ void loader_load(const char *exefs) {
         load_nso(m, path, mods[i].base);
     }
     for (int i = 0; i < g_nmodules; i++) relocate(&g_modules[i]);
-    // (13 Sentinels: main+0x10e15d8 is a relocated pointer to a static table; it is NULL at a crash in f_70002f9c80)
-    const GameVersion *gv = game_version();
-    if (gv && !strncmp(gv->key, "v13_", 4) && getenv("LARECOMP_LOG_DATA")) {
-        uint64_t p = MAIN_BASE + 0x10e15d8ull;
-        LOG("[data] main+0x10e15d8 = %#llx\n", (unsigned long long)*(volatile uint64_t *)(uintptr_t)p);
-    }
 }

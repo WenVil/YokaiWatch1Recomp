@@ -179,8 +179,7 @@ static bool find_tools(Tools *t) {
     if (b > s) s = b;
     if (s) *s = 0;
 #ifdef _WIN32
-    if (!rt_resource("13SentinelsRecomp.dll.a", "build/13SentinelsRecomp.dll.a", t->implib, sizeof t->implib) &&
-        !rt_resource("lasrecomp.dll.a", "build/lasrecomp.dll.a", t->implib, sizeof t->implib))
+    if (!rt_resource("YokaiWatch1Recomp.dll.a", "build/YokaiWatch1Recomp.dll.a", t->implib, sizeof t->implib))
         return false;
     t->zig_rt[0] = 0;
     if (t->zig && rt_resource("zig" SEP "rt" SEP "link.rsp", NULL, t->zig_rt, sizeof t->zig_rt)) {
@@ -404,7 +403,7 @@ bool gamebuild_run_into(const char *game_dir, const char *cache_dir, const GameB
     }
     Tools t;
     if (!find_tools(&t)) {
-        snprintf(why, why_size, "the game code builder is missing from this copy of 13SentinelsRecomp");
+        snprintf(why, why_size, "the game code builder is missing from this copy of Yo-kai Watch 1 Recompiled");
         return false;
     }
     const char *effective_cache = (cache_dir && *cache_dir) ? cache_dir : game_dir;
@@ -435,7 +434,7 @@ bool gamebuild_run_into(const char *game_dir, const char *cache_dir, const GameB
     // Compiler/header/flag changes invalidate every object; entry always rebuilds because it embeds the library id.
     const char *inputs[] = {input_paths[3], input_paths[4], input_paths[5], input_paths[6], t.cc};
     // The compiler's contents identify it, so relocating the app does not discard reusable objects.
-    snprintf(spec, sizeof spec, "LASBUILD3\n%s\n%s\n%s\nzig=%d pointer=%d g0=1 mods=%d mega_o0=%llu%s%s\n",
+    snprintf(spec, sizeof spec, "YW1BUILD3\n%s\n%s\n%s\nzig=%d pointer=%d g0=1 mods=%d mega_o0=%llu%s%s\n",
              GAMELIB_BASE_ID, GAMELIB_CFLAGS, GAMELIB_SHARED, t.zig, (int)sizeof(void *), nmods,
              (unsigned long long)GB_MEGA_O0_BYTES,  // (+ the Linux zig target: objects from
              t.zig && ZIG_TARGET[0] ? " target=" : "", t.zig ? ZIG_TARGET : "");  // before it are rebuilt once)

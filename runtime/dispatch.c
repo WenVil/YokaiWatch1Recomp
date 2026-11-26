@@ -337,8 +337,7 @@ void watch_arm(void) {
     pthread_create(&t, NULL, watch_thread, NULL);
 }
 
-// The renderer's write watch on storage buffers (the Vulkan backend's renderer_watch_fault, exec.c; the Metal one's,
-// renderer.m): registered by the backend when it arms pages, called first for every fault on any thread. A plain
+// The renderer's write watch on storage buffers, called first for every fault on any thread. A plain
 // pointer, not a weak symbol: an undefined weak function reference doesn't link on Mach-O.
 static bool (*g_watch_hook)(uint64_t fa);
 void rt_fault_watch_hook(bool (*hook)(uint64_t fa)) { g_watch_hook = hook; }
@@ -348,9 +347,9 @@ bool rt_fault_watch(uint64_t fa, uint64_t pc) {
     if (fa >= g_watch_lo && fa < g_watch_hi) {
         uint64_t lr = g_fault_lr;
         static int hits;  // (LARECOMP_WATCH_ADDR) each (frame, caller) once with its offset, the first 4000
-        extern uint64_t renderer_present_count(void);
+        extern uint64_t gl_backend_present_count(void);
         static uint64_t last_frame, last_pc;
-        uint64_t fr = renderer_present_count();
+        uint64_t fr = gl_backend_present_count();
         if (getenv("LARECOMP_WATCH_ADDR") && (fr != last_frame || pc != last_pc) && hits++ < 4000) {
             last_frame = fr, last_pc = pc;
             uint64_t lo = 0;

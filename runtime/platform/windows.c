@@ -293,7 +293,7 @@ void plat_thread_realtime(uint64_t period_ns) {
 int plat_thread_realtime_check(uint64_t period_ns) { (void)period_ns; return -1; }
 
 // ---- process
-// GUI launches keep their own append-only log; 13sentinelsrecomp.log names the latest run, with five recent backups.
+// GUI launches keep their own append-only log; yokaiwatch1recomp.log names the latest run, with five recent backups.
 // A launcher and the game it starts share one session, so another launch cannot truncate either writer.
 static char g_log_path[MAX_PATH], g_log_latest[MAX_PATH];
 static char g_log_tag[MAX_PATH + 16];
@@ -317,8 +317,8 @@ static int newest_log(const void *a, const void *b) {
     int time = CompareFileTime(&y->created, &x->created);
     return time ? time : strcmp(y->name, x->name);
 }
-static bool session_log_name(const char *name) {  // 13sentinelsrecomp-backup-<filetime hex>-<pid>.log
-    if (strncmp(name, "13sentinelsrecomp-backup-", 25)) return false;
+static bool session_log_name(const char *name) {  // yokaiwatch1recomp-backup-<filetime hex>-<pid>.log
+    if (strncmp(name, "yokaiwatch1recomp-backup-", 25)) return false;
     const char *p = name + 25;
     while ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || *p == '-') p++;
     return p > name + 25 && !strcmp(p, ".log");
@@ -336,7 +336,7 @@ static void keep_legacy_log(const char *dir) {
         ReadFile(old_file, old_tag, sizeof old_tag - 1, &got, NULL); CloseHandle(old_file);
     }
     char path[MAX_PATH];
-    snprintf(path, sizeof path, "%s13sentinelsrecomp-backup-*.log", dir);
+    snprintf(path, sizeof path, "%syokaiwatch1recomp-backup-*.log", dir);
     WIN32_FIND_DATAA data;
     HANDLE find = FindFirstFileA(path, &data);
     bool kept = false;
@@ -348,16 +348,16 @@ static void keep_legacy_log(const char *dir) {
         while (!kept && FindNextFileA(find, &data));
         FindClose(find);
     }
-    // The first launch after upgrading may only have the old 13sentinelsrecomp.log; retain that report too.
+    // The first launch after upgrading may only have the old log; retain that report too.
     if (!kept) {
         unsigned long long stamp = ((unsigned long long)old.ftCreationTime.dwHighDateTime << 32) | old.ftCreationTime.dwLowDateTime;
-        if (snprintf(path, sizeof path, "%s13sentinelsrecomp-backup-%016llx-0.log", dir, stamp) < (int)sizeof path)
+        if (snprintf(path, sizeof path, "%syokaiwatch1recomp-backup-%016llx-0.log", dir, stamp) < (int)sizeof path)
             CopyFileA(g_log_latest, path, TRUE);
     }
 }
 static void prune_logs(const char *dir) {
     char path[MAX_PATH];
-    if (snprintf(path, sizeof path, "%s13sentinelsrecomp-backup-*.log", dir) >= (int)sizeof path) return;
+    if (snprintf(path, sizeof path, "%syokaiwatch1recomp-backup-*.log", dir) >= (int)sizeof path) return;
     WIN32_FIND_DATAA data;
     HANDLE find = FindFirstFileA(path, &data);
     if (find == INVALID_HANDLE_VALUE) return;
@@ -429,15 +429,15 @@ static void log_to_file_without_console(void) {
     char *slash = strrchr(dir, '\\');
     if (!slash) return;
     slash[1] = 0;
-    if (snprintf(g_log_latest, sizeof g_log_latest, "%s13sentinelsrecomp.log", dir) >= (int)sizeof g_log_latest) return;
+    if (snprintf(g_log_latest, sizeof g_log_latest, "%syokaiwatch1recomp.log", dir) >= (int)sizeof g_log_latest) return;
     unsigned long long hash = 14695981039346656037ull;
     for (const unsigned char *p = (const unsigned char *)g_log_latest; *p; p++) hash = (hash ^ *p) * 1099511628211ull;
-    char mutex[64]; snprintf(mutex, sizeof mutex, "Local\\13SentinelsRecomp.logs.%016llx", hash);
+    char mutex[64]; snprintf(mutex, sizeof mutex, "Local\\YokaiWatch1Recomp.logs.%016llx", hash);
     g_log_mutex = CreateMutexA(NULL, FALSE, mutex);
     if (!lock_logs()) return;
     FILETIME now; GetSystemTimeAsFileTime(&now);
     unsigned long long stamp = ((unsigned long long)now.dwHighDateTime << 32) | now.dwLowDateTime;
-    int used = fresh ? snprintf(g_log_path, sizeof g_log_path, "%s13sentinelsrecomp-backup-%016llx-%lu.log", dir, stamp,
+    int used = fresh ? snprintf(g_log_path, sizeof g_log_path, "%syokaiwatch1recomp-backup-%016llx-%lu.log", dir, stamp,
                                 (unsigned long)GetCurrentProcessId())
                      : snprintf(g_log_path, sizeof g_log_path, "%s", inherited);
     HANDLE file = INVALID_HANDLE_VALUE;
@@ -470,7 +470,7 @@ static void log_to_file_without_console(void) {
         keep_legacy_log(dir);
         char next[MAX_PATH];
         // A shorter name than the session path, which was already checked above.
-        snprintf(next, sizeof next, "%s13sentinelsrecomp-current-%016llx-%lu.tmp", dir, stamp,
+        snprintf(next, sizeof next, "%syokaiwatch1recomp-current-%016llx-%lu.tmp", dir, stamp,
                  (unsigned long)GetCurrentProcessId());
         bool staged = CreateHardLinkA(next, g_log_path, NULL) != 0;
         if (!staged) {
@@ -498,8 +498,8 @@ static void log_to_file_without_console(void) {
 static void require_cpu(void) {
     __builtin_cpu_init();
     if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") && __builtin_cpu_supports("bmi2")) return;
-    MessageBoxA(NULL, "13SentinelsRecomp needs a CPU with AVX2 (Intel Haswell / 2013 or newer, AMD Excavator / Zen or newer).",
-                "13SentinelsRecomp", MB_ICONERROR | MB_OK);
+    MessageBoxA(NULL, "Yo-kai Watch 1 Recompiled needs a CPU with AVX2 (Intel Haswell / 2013 or newer, AMD Excavator / Zen or newer).",
+                "Yo-kai Watch 1 Recompiled", MB_ICONERROR | MB_OK);
     ExitProcess(1);
 }
 
@@ -511,11 +511,11 @@ void plat_fatal_notice(void) {
     rt_crash_explain(text, sizeof text, g_log_path);
     if (!g_log_path[0]) return;
     fflush(stderr);
-    MessageBoxA(NULL, text, "13SentinelsRecomp", MB_ICONERROR | MB_OK);
+    MessageBoxA(NULL, text, "Yo-kai Watch 1 Recompiled", MB_ICONERROR | MB_OK);
 }
 
 static DWORD WINAPI notice_thread(LPVOID text) {
-    MessageBoxA(NULL, text, "13SentinelsRecomp", MB_ICONWARNING | MB_OK);
+    MessageBoxA(NULL, text, "Yo-kai Watch 1 Recompiled", MB_ICONWARNING | MB_OK);
     free(text);
     return 0;
 }
@@ -689,7 +689,7 @@ void plat_print_backtrace(void) {
         const char *s = plat_symbol(pc, &off);
         if (!s) s = rt_host_fn_name(pc, &off);
         if (s) fprintf(stderr, "  #%-2d %016llx %s+%llx\n", i, (unsigned long long)pc, s, (unsigned long long)off);
-        else fprintf(stderr, "  #%-2d %016llx 13sentinels+%llx\n", i, (unsigned long long)pc,
+        else fprintf(stderr, "  #%-2d %016llx yokaiwatch1recomp+%llx\n", i, (unsigned long long)pc,
                      (unsigned long long)(pc - exe));
     }
 }

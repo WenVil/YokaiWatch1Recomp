@@ -1,6 +1,6 @@
 // Builds the game code library (runtime/gamelib.h) on the player's machine, from their own game files: the generator
 // (tools/gen.py; shipped frozen as lasgen/) turns exefs/main and exefs/sdk into C, the bundled compiler (zig/) builds
-// that into <game_dir>/lasgame.*. The compiled pieces are kept in <game_dir>/.gamebuild: an update compiles only the
+// that into <game_dir>/yw1game.*. The compiled pieces are kept in <game_dir>/.gamebuild: an update compiles only the
 // pieces whose generated C changed.
 #pragma once
 #include <stdbool.h>
@@ -19,7 +19,7 @@ typedef struct {
 
 // Builds it (a few minutes). false: why says what went wrong (details in the log).
 bool gamebuild_run(const char *game_dir, const GameBuildOpts *opts, char *why, size_t why_size);
-// Same build reading NSOs from game_dir while storing .gamebuild cache and output lasgame_<build16>.{dll,so,dylib}
+// Same build reading NSOs from game_dir while storing .gamebuild cache and output yw1game_<build16>.{dll,so,dylib}
 // inside cache_dir (falls back to game_dir if cache_dir is NULL or empty).
 bool gamebuild_run_into(const char *game_dir, const char *cache_dir, const GameBuildOpts *opts, char *why,
                         size_t why_size);
