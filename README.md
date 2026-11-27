@@ -29,8 +29,8 @@ A native Windows PC static recompilation runtime for *Yo-kai Watch 1* (Nintendo 
 
 ## Key Features
 
-- **OpenGL 4.5 Rendering & Internal Resolution Scaling**: Hardware OpenGL 4.5 rendering backed by a virtual `1920x1080` framebuffer with selectable internal supersampling (`1x` 1080p / `1.5x` 1620p / `2x` 4K 2160p via `res_scale`), Windowed / Borderless / Exclusive Fullscreen modes, `16:9` aspect lock or stretch, and configurable V-Sync (`mailbox` / `fifo` / `immediate`).
-- **Variable Game Speed (`1.0x` – `3.0x`) & Smooth Pacing**: Cycle between `1.0x`, `1.5x`, `2.0x`, and `3.0x` speed in real time via `F3` or Settings (`game_speed`), with dynamic `dt` frame pacing and audio pitch/rate sync.
+- **OpenGL 4.5 Rendering & Internal Resolution Scaling**: Hardware OpenGL 4.5 rendering backed by a virtual `1920x1080` framebuffer with selectable internal supersampling (`1x` 1080p / `1.5x` 1620p / `2x` 4K 2160p via `res_scale`), automatic discrete GPU preference (`NvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance`), Windowed / Borderless / Exclusive Fullscreen modes, `16:9` aspect lock or stretch, and configurable V-Sync (`mailbox` / `fifo` / `immediate`).
+- **Native 60 FPS & Variable Game Speed (`1.0x` – `3.0x`)**: Runs Switch JP `v1.3.0` natively at **60 FPS** (default; hot-toggleable with original `30 FPS` via `fps_mode` in Launcher or `F1` Display settings) using dynamic `dt` pacing and a smoothed follow-camera interpolator fix (unverified revisions stay safely at `30 FPS`). Stacks cleanly with `1.0x`, `1.5x`, `2.0x`, and `3.0x` real-time speed (`F3` / `game_speed`) and audio pitch/rate sync while keeping pre-rendered cutscenes at `1.0x`.
 - **LayeredFS Mods Overlay (`mods/`)**: Drop extracted RomFS/ExeFS mod packs into `mods/<mod_name>/romfs/` (for example, community translation mods) and toggle them with `mods_enabled = 1` without touching your base dump.
 - **Multilingual High-DPI UI (`F1` Overlay & Launcher)**: Built-in launcher UI and in-game overlay (`F1` or `Minus + Plus`) render cleanly in **English, 简体中文, 繁體中文, 日本語, and 한국어** using Windows DirectWrite/ClearType system CJK fonts alongside bundled SIL OFL fonts.
 - **Controller, Keyboard & Mouse-to-Touch Support**: Switch Pro / Nintendo physical (`nintendo`) and Xbox letter (`xbox`) presets (note: `Xbox` maps host controller button positions only and does not replace in-game Switch button icons), full key/pad rebinding, rumble (`rumble_strength`), and direct mouse-to-touch input for menus and touch gameplay. Settings persist in `yokaiwatch1.ini`.
@@ -102,6 +102,7 @@ Once the 2-module native build completes, subsequent launches start immediately 
 | `RECOMPLAUNCHER_MODE` | `build` / `play` / `launcher` override (`RecompLauncher` integration). |
 | `RECOMPLAUNCHER_DATA` / `LARECOMP_DATA_ROOT` | Override the user data root containing `yokaiwatch1.ini`, `save/`, `mods/`, and `.gamebuild/`. |
 | `RECOMPLAUNCHER_PAD` | Override initial controller preset (`nintendo`, `xbox`, `playstation`). |
+| `YW1_EXP_60FPS` | Force frame-rate override (`1` = native 60 FPS on `v1.3.0`, `0` = original 30 FPS); takes precedence over `fps_mode` in `yokaiwatch1.ini`. |
 
 ---
 

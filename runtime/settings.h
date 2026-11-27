@@ -8,6 +8,7 @@ enum { RES_SCALE_1X = 0, RES_SCALE_1_5X = 1, RES_SCALE_2X = 2 };
 enum { ASPECT_MODE_LOCK_16_9 = 0, ASPECT_MODE_STRETCH = 1 };
 enum { VSYNC_MAILBOX = 0, VSYNC_FIFO = 1, VSYNC_IMMEDIATE = 2 };
 enum { HUD_OFF = 0, HUD_FPS = 1, HUD_DETAILED = 2 };
+enum { FPS_MODE_30 = 0, FPS_MODE_60 = 1 };
 enum { AUDIO_CH_AUTO = 0, AUDIO_CH_STEREO = 1, AUDIO_CH_5_1 = 2 };
 enum { PAD_LAYOUT_NINTENDO = 0, PAD_LAYOUT_XBOX = 1 };
 enum { UI_LANG_AUTO = 0, UI_LANG_ZH_HANS = 1, UI_LANG_ZH_HANT = 2, UI_LANG_EN = 3, UI_LANG_JA = 4, UI_LANG_KO = 5, N_UI_LANGS = 6 };
@@ -55,6 +56,7 @@ typedef struct {
     int res_scale;           // RES_SCALE_* (0=1.0x/1080p, 1=1.5x/1620p, 2=2.0x/4k)
     int aspect_mode;         // ASPECT_MODE_* (0=lock 16:9, 1=stretch)
     int vsync_mode;          // VSYNC_* (0=adaptive/mailbox, 1=vsync on/fifo, 2=vsync off/immediate)
+    int fps_mode;            // FPS_MODE_* (0=30 FPS original, 1=60 FPS native on supported builds)
     int hud_mode;            // HUD_* (0=off, 1=fps, 2=detailed)
     int speed_pct;           // Fast-forward speed in percent (100/150/200/300)
     bool mods_enabled;       // LayeredFS overlay (<data_root>/mods/<name>/romfs)

@@ -474,6 +474,25 @@ static void tab_display(float scale) {
         settings_save();
     }
     {
+        const char *fps_opts[2] = {ui_tr(STR_FPS_30), ui_tr(STR_FPS_60)};
+        bool env_locked = gl_backend_fps_locked_by_env();
+        bool supported = gl_backend_60fps_supported();
+        const char *env_fps = getenv("YW1_EXP_60FPS");
+        int shown = (env_locked && env_fps)
+                        ? (strcmp(env_fps, "0") == 0 ? FPS_MODE_30 : FPS_MODE_60)
+                        : (!supported ? FPS_MODE_30
+                                      : __atomic_load_n(&g_settings.fps_mode, __ATOMIC_RELAXED));
+        if (shown < 0 || shown > 1) shown = FPS_MODE_60;
+        const char *desc = env_locked ? ui_tr(STR_OPT_FPS_MODE_DESC_LOCKED)
+                                      : (!supported ? ui_tr(STR_OPT_FPS_MODE_DESC_UNSUPPORTED)
+                                                    : ui_tr(STR_OPT_FPS_MODE_DESC));
+        if (env_locked || !supported) opt_disable_next();
+        if (opt_choice(ui_tr(STR_OPT_FPS_MODE), &shown, fps_opts, 2, FPS_MODE_60, desc, false)) {
+            __atomic_store_n(&g_settings.fps_mode, shown, __ATOMIC_RELAXED);
+            settings_save();
+        }
+    }
+    {
         const char *spd_opts[4] = {
             ui_tr(STR_SPEED_1X), ui_tr(STR_SPEED_1_5X), ui_tr(STR_SPEED_2X), ui_tr(STR_SPEED_3X)
         };

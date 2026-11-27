@@ -14,6 +14,13 @@
 #include "gl/gl_imgui.h"
 #include "kernel.h"
 
+#ifdef _WIN32
+/* Ask NVIDIA Optimus and AMD Switchable Graphics drivers to select the
+ * discrete high-performance GPU automatically when available. */
+__declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+#endif
+
 const char *g_romfs_dir;
 
 // rtld normally passes these to nn::init::Start: run every module's init/fini arrays.

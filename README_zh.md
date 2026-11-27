@@ -29,8 +29,8 @@
 
 ## 主要特性
 
-- **OpenGL 4.5 硬件渲染与高分辨率超采样**：使用虚拟 `1920x1080` 帧缓冲并支持内部分辨率超采样（`res_scale`：`1x` 1080p / `1.5x` 1620p / `2x` 4K 2160p），支持窗口 / 无边框全屏 / 独占全屏（`window_mode`）、`16:9` 等比或铺满拉伸（`aspect_mode`）及多档垂直同步（`mailbox` / `fifo` / `immediate`）。
-- **实时多倍速游戏与动态步长（`1.0x` ~ `3.0x`）**：可按 **`F3`** 或在设置中随时切换 `1.0x` / `1.5x` / `2.0x` / `3.0x` 游戏速度（`game_speed`），并保持动态 `dt` 时序与音画同步。
+- **OpenGL 4.5 硬件渲染、独显首选与高分辨率超采样**：使用虚拟 `1920x1080` 帧缓冲并支持内部分辨率超采样（`res_scale`：`1x` 1080p / `1.5x` 1620p / `2x` 4K 2160p），导出 `NvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance` 自动优先调度独立显卡，支持窗口 / 无边框全屏 / 独占全屏（`window_mode`）、`16:9` 等比或铺满拉伸（`aspect_mode`）及多档垂直同步（`mailbox` / `fifo` / `immediate`）。
+- **原生 60 帧模式（带跟随镜头平滑修复）与实时倍速（`1.0x` ~ `3.0x`）**：针对 Switch 日版 `v1.3.0` 原生解锁 **60 FPS**（默认开启，可在启动器或 `F1` 显示设置中随时热切换回原版 `30 FPS`，`fps_mode`），并内置 3D 跟随相机平滑插值修复；未验证版本自动安全维持 `30 FPS`。支持按 **`F3`** 或设置随时切换 `1.0x` / `1.5x` / `2.0x` / `3.0x` 倍速（`game_speed`），可与 60 帧直接叠加并保持过场影片自动回归 `1.0x`。
 - **LayeredFS Mod 覆盖层（`mods/`）**：将汉化包/英文补丁等 Mod 放入 `mods/<Mod名称>/romfs/`（或 `exefs/`），通过 `mods_enabled = 1` 热启用替换与新增文件，不修改原始解包目录。
 - **五国语言高 DPI 启动器与 `F1` 实时覆盖菜单**：启动前端与游戏内设置菜单（`F1` 或手柄 `Minus + Plus`）均完整支持 **简体中文 / 繁體中文 / English / 日本語 / 한국어** 高 DPI 无缺字渲染（加载 Windows ClearType/DirectWrite 系统字体与开源 OFL 字体）。
 - **手柄 / 键鼠 / 触摸全面适配**：提供 Nintendo Switch 物理键位与 Xbox 字母键位预设（注意：`Xbox` 仅重映射手柄输入布局，不会替换游戏内显示的 Switch 按键图标），支持全按键自定义、手柄震动强度调节（`rumble_strength`）以及鼠标点击直接映射触屏交互；设置保存在 `yokaiwatch1.ini`。
@@ -102,6 +102,7 @@ YokaiWatch1_GameFiles/
 | `RECOMPLAUNCHER_MODE` | 指定启动模式（`build` / `play` / `launcher`）。 |
 | `RECOMPLAUNCHER_DATA` / `LARECOMP_DATA_ROOT` | 指定用户数据目录（包含 `yokaiwatch1.ini`、`save/`、`mods/`、`.gamebuild/`）。 |
 | `RECOMPLAUNCHER_PAD` | 覆盖初始手柄映射预设（`nintendo` / `xbox` / `playstation`）。 |
+| `YW1_EXP_60FPS` | 强制锁定帧率模式（`1` = 日版 `v1.3.0` 原生 60 FPS，`0` = 原版 30 FPS）；优先级高于 `yokaiwatch1.ini` 中的 `fps_mode`。 |
 
 ---
 

@@ -269,6 +269,31 @@
       "advanced": false
     },
     {
+      "id": "fps_mode",
+      "label": "Frame rate",
+      "group": "Display",
+      "help": "Selects native 60 FPS with smoothed follow camera (v1.3.0) or original 30 FPS.",
+      "choices": [
+        {
+          "label": "60 FPS (Recommended)",
+          "set": {
+            "fps_mode": "1"
+          }
+        },
+        {
+          "label": "30 FPS (Original)",
+          "set": {
+            "fps_mode": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "fps_mode": "1"
+      },
+      "in": "main",
+      "advanced": false
+    },
+    {
       "id": "game_speed",
       "label": "Game speed",
       "group": "Display",

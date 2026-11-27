@@ -80,17 +80,47 @@ static volatile uint8_t *yw1_v130_pacing_base(bool warn_unsupported) {
     return (volatile uint8_t *)(uintptr_t)addr;
 }
 
-static bool exp_60fps_enabled(void) {
-    static int s_exp = -1;
-    if (s_exp < 0) {
-        const char *env = getenv("YW1_EXP_60FPS");
-        s_exp = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+static int env_60fps_override(void) {
+    const char *env = getenv("YW1_EXP_60FPS");
+    if (!env || !*env) return -1;
+    return strcmp(env, "0") == 0 ? 0 : 1;
+}
+
+bool gl_backend_fps_locked_by_env(void) {
+    return env_60fps_override() >= 0;
+}
+
+bool gl_backend_60fps_supported(void) {
+    const GameVersion *gv = game_version();
+    if (gv) return yw1_is_jp_130(false);
+    static char s_cached_dir[512];
+    static int s_cached_ok = -1;
+    if (!g_settings.game_dir[0]) return true;
+    if (s_cached_ok < 0 || strncmp(s_cached_dir, g_settings.game_dir, sizeof(s_cached_dir)) != 0) {
+        snprintf(s_cached_dir, sizeof(s_cached_dir), "%s", g_settings.game_dir);
+        const GameVersion *vg = game_version_of(s_cached_dir);
+        if (!vg) {
+            s_cached_ok = 1;
+        } else {
+            s_cached_ok = (vg->key && strcmp(vg->key, "vyw1_jp_v1_3_0") == 0 &&
+                           vg->build_id && strncmp(vg->build_id, "B6E172353E696E65", 16) == 0)
+                              ? 1
+                              : 0;
+        }
     }
-    return s_exp == 1;
+    return s_cached_ok == 1;
+}
+
+bool gl_backend_effective_60fps(void) {
+    int ov = env_60fps_override();
+    bool want = (ov >= 0) ? (ov == 1)
+                          : (__atomic_load_n(&g_settings.fps_mode, __ATOMIC_RELAXED) == FPS_MODE_60);
+    if (!want) return false;
+    return yw1_is_jp_130(true);
 }
 
 bool yw1_v130_cam60_fix_active(void) {
-    if (!exp_60fps_enabled()) return false;
+    if (!gl_backend_effective_60fps()) return false;
     static int s_fix = -1;
     if (s_fix < 0) {
         const char *env = getenv("YW1_CAM60_FIX");
@@ -129,6 +159,7 @@ static uint32_t s_probe_last_tgt = UINT32_MAX;
 static uint32_t s_probe_last_base = UINT32_MAX;
 static int s_probe_edge_logs;
 static uint64_t s_exp_60fps_overrides;
+static bool s_60fps_override_applied;
 
 static bool guest_range_ok(uint64_t addr, size_t size, uint64_t lo, uint64_t hi) {
     return addr >= lo && addr <= hi && size <= hi - addr;
@@ -411,6 +442,7 @@ void gl_backend_reset(void) {
     s_probe_last_base = UINT32_MAX;
     s_probe_edge_logs = 0;
     s_exp_60fps_overrides = 0;
+    s_60fps_override_applied = false;
 }
 void gl_backend_guest_memory_reset(void) {}
 void gl_backend_clear_window(void) {}
@@ -428,7 +460,7 @@ void gl_backend_quit(void) {
         LOG("[60fps-probe] SUMMARY exp_60fps=%d total_swaps=%llu logic_frames=%llu elapsed_s=%.3f "
             "swap_fps=%.2f logic_fps=%.2f overrides=%llu swap_interval=%d "
             "movie_start_frame=%llu movie_start_ms=%.1f movie_end_ms=%.1f\n",
-            exp_60fps_enabled() ? 1 : 0, (unsigned long long)total_frames,
+            gl_backend_effective_60fps() ? 1 : 0, (unsigned long long)total_frames,
             (unsigned long long)s_probe_logic_frames, elapsed_s, swap_fps, logic_fps,
             (unsigned long long)s_exp_60fps_overrides, s_swap_interval,
             (unsigned long long)s_probe_movie_start_frame, s_probe_movie_start_ms, s_probe_movie_end_ms);
@@ -568,10 +600,10 @@ void gl_backend_swap_buffers(void) {
     if (frame <= 10 || frame % 60 == 0) {
         LOG("[gl] eglSwapBuffers frame=%llu\n", (unsigned long long)frame);
     }
-    bool want_exp_60fps = exp_60fps_enabled();
+    bool want_exp_60fps = gl_backend_effective_60fps();
     bool need_probe = probe_60fps_enabled();
     bool need_cam = probe_cam_enabled();
-    if (want_exp_60fps || need_probe || need_cam) {
+    if (want_exp_60fps || s_60fps_override_applied || need_probe || need_cam) {
         volatile uint8_t *pbase = yw1_v130_pacing_base(frame == 1);
         uint32_t pre_tgt = 0;
         uint32_t pre_base = 0;
@@ -581,12 +613,20 @@ void gl_backend_swap_buffers(void) {
             if (want_exp_60fps && pre_tgt == 2 && pre_base >= 1 && pre_base <= 6) {
                 *(volatile uint32_t *)(pbase + 0x7d4) = 1u;
                 *(volatile float *)(pbase + 0x7dc) = 1.0f / (float)pre_base;
+                s_60fps_override_applied = true;
                 s_exp_60fps_overrides++;
                 if (s_exp_60fps_overrides <= 10) {
                     LOG("[60fps] override #%llu at frame=%llu: target_vsync(+7d4) 2->1 base(+7d0)=%u ratio(+7dc)->%.3f\n",
                         (unsigned long long)s_exp_60fps_overrides, (unsigned long long)frame,
                         pre_base, (double)(1.0f / (float)pre_base));
                 }
+            } else if (!want_exp_60fps && s_60fps_override_applied && !movie_is_playing() &&
+                       pre_tgt == 1 && pre_base >= 1 && pre_base <= 6) {
+                *(volatile uint32_t *)(pbase + 0x7d4) = 2u;
+                *(volatile float *)(pbase + 0x7dc) = 2.0f / (float)pre_base;
+                s_60fps_override_applied = false;
+                LOG("[60fps] hot-toggled off at frame=%llu: target_vsync(+7d4) 1->2 base(+7d0)=%u ratio(+7dc)->%.3f\n",
+                    (unsigned long long)frame, pre_base, (double)(2.0f / (float)pre_base));
             }
         }
         if (need_probe) {

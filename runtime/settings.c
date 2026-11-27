@@ -56,6 +56,7 @@ Settings g_settings = {
     .res_scale = RES_SCALE_1X,
     .aspect_mode = ASPECT_MODE_LOCK_16_9,
     .vsync_mode = VSYNC_MAILBOX,
+    .fps_mode = FPS_MODE_60,
     .hud_mode = HUD_OFF,
     .speed_pct = 100,
     .mods_enabled = true,
@@ -280,6 +281,10 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "aspect_mode")) g_settings.aspect_mode = parse_choice(val, k_aspect_modes, 2, ASPECT_MODE_LOCK_16_9);
         else if (!strcmp(key, "vsync_mode")) g_settings.vsync_mode = parse_choice(val, k_vsync_modes, 3, VSYNC_MAILBOX);
+        else if (!strcmp(key, "fps_mode")) {
+            if (!strcmp(val, "0") || !strcmp(val, "30") || !strcmp(val, "30fps")) g_settings.fps_mode = FPS_MODE_30;
+            else if (!strcmp(val, "1") || !strcmp(val, "60") || !strcmp(val, "60fps")) g_settings.fps_mode = FPS_MODE_60;
+        }
         else if (!strcmp(key, "hud_mode")) { g_settings.hud_mode = parse_choice(val, k_hud_modes, 3, HUD_OFF); seen_hud_mode = true; }
         else if (!strcmp(key, "game_speed")) {
             double sp = atof(val);
@@ -369,6 +374,7 @@ void settings_save(void) {
     fprintf(f, "res_scale = %s\n", k_res_scales[clamp_int(g_settings.res_scale, 0, 2)]);
     fprintf(f, "aspect_mode = %s\n", k_aspect_modes[clamp_int(g_settings.aspect_mode, 0, 1)]);
     fprintf(f, "vsync_mode = %s\n", k_vsync_modes[clamp_int(g_settings.vsync_mode, 0, 2)]);
+    fprintf(f, "fps_mode = %d\n", clamp_int(g_settings.fps_mode, 0, 1));
     fprintf(f, "hud_mode = %s\n", k_hud_modes[clamp_int(g_settings.hud_mode, 0, 2)]);
     fprintf(f, "game_speed = %.1fx\n", (double)(g_settings.speed_pct >= 100 ? g_settings.speed_pct : 100) / 100.0);
     fprintf(f, "mods_enabled = %d\n", g_settings.mods_enabled ? 1 : 0);

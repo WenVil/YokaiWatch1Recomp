@@ -1548,6 +1548,20 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
                             settings_save();
                         }
                     }
+                    {
+                        bool env_locked = gl_backend_fps_locked_by_env();
+                        bool supported = gl_backend_60fps_supported();
+                        const char *env_fps = getenv("YW1_EXP_60FPS");
+                        bool fps60 = env_locked
+                                         ? (env_fps && strcmp(env_fps, "0") != 0)
+                                         : (supported && __atomic_load_n(&g_settings.fps_mode, __ATOMIC_RELAXED) == FPS_MODE_60);
+                        if (env_locked || !supported) ImGui::BeginDisabled();
+                        if (ImGui::Checkbox(ui_tr(STR_OPT_QUICK_60FPS), &fps60)) {
+                            __atomic_store_n(&g_settings.fps_mode, fps60 ? FPS_MODE_60 : FPS_MODE_30, __ATOMIC_RELAXED);
+                            settings_save();
+                        }
+                        if (env_locked || !supported) ImGui::EndDisabled();
+                    }
                     ImGui::EndChild();  // quickset_card
 
                     ImGui::EndChild();  // right_col

@@ -31,6 +31,9 @@ void gl_backend_apply_pending_vsync(void);
 void gl_backend_set_loading(bool loading);
 bool gl_backend_is_loading(void);
 uint64_t gl_backend_present_count(void);
+bool gl_backend_60fps_supported(void);
+bool gl_backend_fps_locked_by_env(void);
+bool gl_backend_effective_60fps(void);
 
 // EGL -> SDL3 GL bridge (called from guest render thread).
 bool gl_backend_make_current(bool make_null);

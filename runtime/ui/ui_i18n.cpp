@@ -323,6 +323,15 @@ static const Entry k_table[STR_COUNT] = {
     {"当前已启用 %d 个 Mod（启动或重启游戏时自动挂载）。", "目前已啟用 %d 個 Mod（啟動或重啟遊戲時自動掛載）。", "%d active mod(s) ready to overlay at game boot.", "有効な Mod: %d 件（起動時に自動マウントされます）。", "활성 모드: %d개 (게임 시작 시 자동 적용)."},
     {"当前已禁用 Mod 覆盖层。", "目前已停用 Mod 覆蓋層。", "Mod overlay is currently disabled.", "Mod オーバーレイは無効になっています。", "모드 오버레이가 현재 비활성화되어 있습니다."},
     {"Mods: %d 个已启用", "Mods: %d 個已啟用", "Mods: %d active", "Mods: %d 件有効", "Mods: %d개 활성"},
+
+    // Phase 3D: 60 FPS Toggle
+    {"目标帧率", "目標幀率", "Frame Rate", "フレームレート", "프레임 레이트"},
+    {"30 FPS（原版）", "30 FPS（原版）", "30 FPS (Original)", "30 FPS (オリジナル)", "30 FPS (원본)"},
+    {"60 FPS（推荐）", "60 FPS（推薦）", "60 FPS (Recommended)", "60 FPS (推奨)", "60 FPS (권장)"},
+    {"在日版 v1.3.0 中原生以 60 FPS 运行并修复跟随相机平滑插值，可与倍速叠加且即时热切换；其它版本自动回退原版 30 FPS。", "在日版 v1.3.0 中原生以 60 FPS 執行並修復跟隨相機平滑插值，可與倍速疊加且即時熱切換；其他版本自動回退原版 30 FPS。", "Runs JP v1.3.0 natively at 60 FPS with smoothed follow-camera interpolation (stacks with game speed and hot-toggles live); other builds stay at 30 FPS.", "日本版 v1.3.0 でネイティブ 60 FPS（追従カメラ補間修正済み）で動作し、倍速と併用・即時切替が可能です。他バージョンは自動で 30 FPS に維持されます。", "일본판 v1.3.0에서 네이티브 60 FPS(추적 카메라 보간 수정)로 실행되며 배속과 함께 즉시 전환됩니다. 다른 버전은 30 FPS로 자동 유지됩니다."},
+    {"当前帧率已被环境变量 YW1_EXP_60FPS 锁定。", "目前幀率已被環境變數 YW1_EXP_60FPS 鎖定。", "Locked by the YW1_EXP_60FPS environment variable.", "環境変数 YW1_EXP_60FPS により固定されています。", "환경 변수 YW1_EXP_60FPS에 의해 고정되었습니다."},
+    {"当前游戏版本 Build ID 尚未验证，为保证内存安全已自动维持原版 30 FPS。", "目前遊戲版本 Build ID 尚未驗證，為確保記憶體安全已自動維持原版 30 FPS。", "Unverified game Build ID detected; safely locked to original 30 FPS.", "未検証のゲーム Build ID のため、安全のためオリジナル 30 FPS に維持されます。", "미확인 게임 Build ID로 인해 안전을 위해 원본 30 FPS로 유지됩니다."},
+    {"启用原生 60 FPS（推荐）", "啟用原生 60 FPS（推薦）", "Enable Native 60 FPS", "ネイティブ 60 FPS を有効化", "네이티브 60 FPS 활성화"},
 };
 
 static_assert(sizeof(k_table) / sizeof(k_table[0]) == STR_COUNT, "k_table must match UiStr count");
