@@ -47,6 +47,97 @@ static atomic_int s_pending_swap_interval = -99;
 extern bool menu_handle_event(const SDL_Event *e);
 extern void menu_apply_window_requests(void *sdl_window);
 extern int rt_reboot_kind(void);
+extern bool movie_is_playing(void);
+extern volatile uint64_t g_vsync_count;
+
+#define YW1_JP130_PACING_OFF 0x8c3d60ull
+
+static bool yw1_is_jp_130(bool warn_once) {
+    const GameVersion *gv = game_version();
+    if (gv && gv->key && strcmp(gv->key, "vyw1_jp_v1_3_0") == 0 &&
+        gv->build_id && strncmp(gv->build_id, "B6E172353E696E65", 16) == 0) {
+        return true;
+    }
+    if (warn_once) {
+        static atomic_flag s_warned = ATOMIC_FLAG_INIT;
+        if (!atomic_flag_test_and_set(&s_warned)) {
+            LOG("[60fps] build_id guard: skipping 0x70008c3d60 access for key=%s build_id=%s (expected vyw1_jp_v1_3_0 / B6E172353E696E65)\n",
+                (gv && gv->key) ? gv->key : "null",
+                (gv && gv->build_id) ? gv->build_id : "null");
+        }
+    }
+    return false;
+}
+
+static volatile uint8_t *yw1_v130_pacing_base(bool warn_unsupported) {
+    if (!yw1_is_jp_130(warn_unsupported)) return NULL;
+    uint64_t lo = 0, hi = 0;
+    if (!plat_guest_bounds(&lo, &hi)) return NULL;
+    uint64_t addr = MAIN_BASE + YW1_JP130_PACING_OFF;
+    if (addr < lo || addr + 0x1338ull > hi) return NULL;
+    uint64_t vt = *(const volatile uint64_t *)(uintptr_t)addr;
+    if (vt < MAIN_BASE + 0x600000ull || vt >= MAIN_BASE + 0x2000000ull) return NULL;
+    return (volatile uint8_t *)(uintptr_t)addr;
+}
+
+static bool exp_60fps_enabled(void) {
+    static int s_exp = -1;
+    if (s_exp < 0) {
+        const char *env = getenv("YW1_EXP_60FPS");
+        s_exp = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    return s_exp == 1;
+}
+
+static bool probe_60fps_enabled(void) {
+    static int s_probe = -1;
+    if (s_probe < 0) {
+        const char *env = getenv("YW1_60FPS_PROBE");
+        s_probe = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    return s_probe == 1;
+}
+
+static uint64_t s_probe_t0_ns;
+static uint64_t s_probe_last_t_ns;
+static uint64_t s_probe_movie_start_frame;
+static double s_probe_movie_start_ms = -1.0;
+static double s_probe_movie_end_ms = -1.0;
+static bool s_probe_prev_movie;
+static uint64_t s_probe_logic_frames;
+static uint32_t s_probe_last_prev_vsync = UINT32_MAX;
+static uint32_t s_probe_last_tgt = UINT32_MAX;
+static uint32_t s_probe_last_base = UINT32_MAX;
+static int s_probe_edge_logs;
+static uint64_t s_exp_60fps_overrides;
+
+static void probe_log_snapshot(uint64_t frame, uint64_t now_ns, const char *reason, volatile uint8_t *base) {
+    double t_ms = s_probe_t0_ns ? (double)(now_ns - s_probe_t0_ns) / 1e6 : 0.0;
+    int mov = movie_is_playing() ? 1 : 0;
+    uint64_t vs = __atomic_load_n(&g_vsync_count, __ATOMIC_RELAXED);
+    if (base) {
+        uint32_t cur = *(const volatile uint32_t *)(base + 0x7c8);
+        uint32_t prev = *(const volatile uint32_t *)(base + 0x7cc);
+        uint32_t base_v = *(const volatile uint32_t *)(base + 0x7d0);
+        uint32_t tgt_v = *(const volatile uint32_t *)(base + 0x7d4);
+        uint32_t base_fps = *(const volatile uint32_t *)(base + 0x7d8);
+        float ratio = *(const volatile float *)(base + 0x7dc);
+        uint8_t flag = *(const volatile uint8_t *)(base + 0x7e0);
+        float dt_out = *(const volatile float *)(base + 0x131c);
+        float time_scale = *(const volatile float *)(base + 0x1328);
+        LOG("[60fps-probe] tag=%s frame=%llu logic=%llu t_ms=%.1f vsync=%llu movie=%d base=%#llx "
+            "cur(+7c8)=%u prev(+7cc)=%u base_vsync(+7d0)=%u target_vsync(+7d4)=%u base_fps(+7d8)=%u "
+            "ratio(+7dc)=%.3f flag(+7e0)=%u dt(+131c)=%.3f mul(+1328)=%.3f overrides=%llu\n",
+            reason, (unsigned long long)frame, (unsigned long long)s_probe_logic_frames, t_ms,
+            (unsigned long long)vs, mov, (unsigned long long)(uintptr_t)base,
+            cur, prev, base_v, tgt_v, base_fps,
+            (double)ratio, (unsigned)flag, (double)dt_out, (double)time_scale,
+            (unsigned long long)s_exp_60fps_overrides);
+    } else {
+        LOG("[60fps-probe] tag=%s frame=%llu t_ms=%.1f vsync=%llu movie=%d base=unready\n",
+            reason, (unsigned long long)frame, t_ms, (unsigned long long)vs, mov);
+    }
+}
 
 static int vsync_interval_from_settings(void) {
     switch (g_settings.vsync_mode) {
@@ -231,13 +322,42 @@ void gl_backend_window_init(void) {
 }
 
 void gl_backend_init(void) { gl_backend_window_init(); }
-void gl_backend_reset(void) { atomic_store_explicit(&s_frames, 0, memory_order_release); }
+void gl_backend_reset(void) {
+    atomic_store_explicit(&s_frames, 0, memory_order_release);
+    s_probe_t0_ns = 0;
+    s_probe_last_t_ns = 0;
+    s_probe_movie_start_frame = 0;
+    s_probe_movie_start_ms = -1.0;
+    s_probe_movie_end_ms = -1.0;
+    s_probe_prev_movie = false;
+    s_probe_logic_frames = 0;
+    s_probe_last_prev_vsync = UINT32_MAX;
+    s_probe_last_tgt = UINT32_MAX;
+    s_probe_last_base = UINT32_MAX;
+    s_probe_edge_logs = 0;
+    s_exp_60fps_overrides = 0;
+}
 void gl_backend_guest_memory_reset(void) {}
 void gl_backend_clear_window(void) {}
 
 void gl_backend_quit(void) {
     if (atomic_flag_test_and_set(&s_quit_once)) return;
     atomic_store_explicit(&s_quitting, true, memory_order_release);
+    if (probe_60fps_enabled()) {
+        uint64_t total_frames = atomic_load_explicit(&s_frames, memory_order_acquire);
+        double elapsed_s = (s_probe_t0_ns && s_probe_last_t_ns > s_probe_t0_ns)
+                               ? (double)(s_probe_last_t_ns - s_probe_t0_ns) / 1e9
+                               : 0.0;
+        double swap_fps = (elapsed_s > 0.0 && total_frames > 0) ? (double)total_frames / elapsed_s : 0.0;
+        double logic_fps = (elapsed_s > 0.0 && s_probe_logic_frames > 0) ? (double)s_probe_logic_frames / elapsed_s : 0.0;
+        LOG("[60fps-probe] SUMMARY exp_60fps=%d total_swaps=%llu logic_frames=%llu elapsed_s=%.3f "
+            "swap_fps=%.2f logic_fps=%.2f overrides=%llu swap_interval=%d "
+            "movie_start_frame=%llu movie_start_ms=%.1f movie_end_ms=%.1f\n",
+            exp_60fps_enabled() ? 1 : 0, (unsigned long long)total_frames,
+            (unsigned long long)s_probe_logic_frames, elapsed_s, swap_fps, logic_fps,
+            (unsigned long long)s_exp_60fps_overrides, s_swap_interval,
+            (unsigned long long)s_probe_movie_start_frame, s_probe_movie_start_ms, s_probe_movie_end_ms);
+    }
     input_shutdown();
     gl_hle_log_summary();
     gl_imgui_overlay_log_summary();
@@ -367,8 +487,68 @@ void gl_backend_swap_buffers(void) {
         return;
     }
     uint64_t frame = atomic_fetch_add_explicit(&s_frames, 1, memory_order_acq_rel) + 1;
+    uint64_t now_swap_ns = plat_now_ns();
+    if (!s_probe_t0_ns) s_probe_t0_ns = now_swap_ns;
+    s_probe_last_t_ns = now_swap_ns;
     if (frame <= 10 || frame % 60 == 0) {
         LOG("[gl] eglSwapBuffers frame=%llu\n", (unsigned long long)frame);
+    }
+    bool want_exp_60fps = exp_60fps_enabled();
+    bool need_probe = probe_60fps_enabled();
+    if (want_exp_60fps || need_probe) {
+        volatile uint8_t *pbase = yw1_v130_pacing_base(frame == 1);
+        uint32_t pre_tgt = 0;
+        uint32_t pre_base = 0;
+        if (pbase) {
+            pre_base = *(const volatile uint32_t *)(pbase + 0x7d0);
+            pre_tgt = *(const volatile uint32_t *)(pbase + 0x7d4);
+            if (want_exp_60fps && pre_tgt == 2 && pre_base >= 1 && pre_base <= 6) {
+                *(volatile uint32_t *)(pbase + 0x7d4) = 1u;
+                *(volatile float *)(pbase + 0x7dc) = 1.0f / (float)pre_base;
+                s_exp_60fps_overrides++;
+                if (s_exp_60fps_overrides <= 10) {
+                    LOG("[60fps] override #%llu at frame=%llu: target_vsync(+7d4) 2->1 base(+7d0)=%u ratio(+7dc)->%.3f\n",
+                        (unsigned long long)s_exp_60fps_overrides, (unsigned long long)frame,
+                        pre_base, (double)(1.0f / (float)pre_base));
+                }
+            }
+        }
+        if (need_probe) {
+            bool edge_change = false;
+            if (pbase) {
+                uint32_t cur_prev = *(const volatile uint32_t *)(pbase + 0x7cc);
+                if (cur_prev != s_probe_last_prev_vsync) {
+                    s_probe_logic_frames++;
+                    s_probe_last_prev_vsync = cur_prev;
+                }
+                uint32_t cur_base = *(const volatile uint32_t *)(pbase + 0x7d0);
+                uint32_t cur_tgt = *(const volatile uint32_t *)(pbase + 0x7d4);
+                if (cur_base != s_probe_last_base || cur_tgt != s_probe_last_tgt || pre_tgt != cur_tgt) {
+                    s_probe_last_base = cur_base;
+                    s_probe_last_tgt = cur_tgt;
+                    if (s_probe_edge_logs < 24) {
+                        s_probe_edge_logs++;
+                        edge_change = true;
+                    }
+                }
+            }
+            bool mov_now = movie_is_playing();
+            if (frame == 1 || frame == 30 || frame == 120 || frame == 450 || frame == 700 ||
+                frame == 1000 || frame == 1400) {
+                probe_log_snapshot(frame, now_swap_ns, "tick", pbase);
+            } else if (edge_change) {
+                probe_log_snapshot(frame, now_swap_ns, "pacing_change", pbase);
+            }
+            if (mov_now && !s_probe_prev_movie) {
+                s_probe_movie_start_frame = frame;
+                s_probe_movie_start_ms = (double)(now_swap_ns - s_probe_t0_ns) / 1e6;
+                probe_log_snapshot(frame, now_swap_ns, "movie_start", pbase);
+            } else if (!mov_now && s_probe_prev_movie) {
+                s_probe_movie_end_ms = (double)(now_swap_ns - s_probe_t0_ns) / 1e6;
+                probe_log_snapshot(frame, now_swap_ns, "movie_end", pbase);
+            }
+            s_probe_prev_movie = mov_now;
+        }
     }
     if (frame_should_dump(frame)) dump_frame_bmp(frame);
     int win_w = 1280, win_h = 720, pw = 1280, ph = 720;
@@ -381,7 +561,8 @@ void gl_backend_swap_buffers(void) {
             s_swap_interval = 0;
             s_speed_vsync_overridden = true;
         }
-        uint64_t target_frame_ns = (33333333ull * 100ull) / eff_pct;
+        uint64_t base_frame_ns = want_exp_60fps ? 16666667ull : 33333333ull;
+        uint64_t target_frame_ns = (base_frame_ns * 100ull) / eff_pct;
         uint64_t now_ns = plat_now_ns();
         if (s_last_swap_ns > 0 && now_ns - s_last_swap_ns < target_frame_ns) {
             plat_sleep_until_ns(s_last_swap_ns + target_frame_ns);
@@ -401,8 +582,15 @@ void gl_backend_swap_buffers(void) {
     SDL_GL_SwapWindow(s_window);
     gl_hle_check_post_swap_errors(frame);
     input_frame(frame);
-    if (input_should_stop(frame)) {
-        LOG("[replay] graceful stop at frame=%llu\n", (unsigned long long)frame);
+    static int64_t s_stop_after_ms = -2;
+    if (s_stop_after_ms == -2) {
+        const char *se = getenv("YW1_STOP_AFTER_MS");
+        s_stop_after_ms = (se && *se) ? strtoll(se, NULL, 10) : -1;
+    }
+    bool time_stop = (s_stop_after_ms > 0 && (double)(plat_now_ns() - s_probe_t0_ns) / 1e6 >= (double)s_stop_after_ms);
+    if (input_should_stop(frame) || time_stop) {
+        LOG("[replay] graceful stop at frame=%llu (reason=%s)\n",
+            (unsigned long long)frame, time_stop ? "time_limit" : "replay_stop");
         gl_backend_quit();
         fflush(stdout);
         fflush(stderr);
