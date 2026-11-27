@@ -89,6 +89,16 @@ static bool exp_60fps_enabled(void) {
     return s_exp == 1;
 }
 
+bool yw1_v130_cam60_fix_active(void) {
+    if (!exp_60fps_enabled()) return false;
+    static int s_fix = -1;
+    if (s_fix < 0) {
+        const char *env = getenv("YW1_CAM60_FIX");
+        s_fix = (env && strcmp(env, "0") == 0) ? 0 : 1;
+    }
+    return s_fix == 1 && yw1_is_jp_130(false);
+}
+
 static bool probe_60fps_enabled(void) {
     static int s_probe = -1;
     if (s_probe < 0) {
@@ -96,6 +106,15 @@ static bool probe_60fps_enabled(void) {
         s_probe = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
     }
     return s_probe == 1;
+}
+
+static bool probe_cam_enabled(void) {
+    static int s_cam = -1;
+    if (s_cam < 0) {
+        const char *env = getenv("YW1_CAM_PROBE");
+        s_cam = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    return s_cam == 1;
 }
 
 static uint64_t s_probe_t0_ns;
@@ -110,6 +129,62 @@ static uint32_t s_probe_last_tgt = UINT32_MAX;
 static uint32_t s_probe_last_base = UINT32_MAX;
 static int s_probe_edge_logs;
 static uint64_t s_exp_60fps_overrides;
+
+static bool guest_range_ok(uint64_t addr, size_t size, uint64_t lo, uint64_t hi) {
+    return addr >= lo && addr <= hi && size <= hi - addr;
+}
+
+static void probe_log_camera(uint64_t frame, uint64_t now_ns, volatile uint8_t *base) {
+    if (!base) return;
+    uint64_t lo = 0, hi = 0;
+    if (!plat_guest_bounds(&lo, &hi)) return;
+    uint64_t cm_ptr = *(const volatile uint64_t *)(base + 0xdc40);
+    if (!guest_range_ok(cm_ptr, 0x100, lo, hi)) return;
+    double t_ms = s_probe_t0_ns ? (double)(now_ns - s_probe_t0_ns) / 1e6 : 0.0;
+    float dt_out = *(const volatile float *)(base + 0x131c);
+    uint32_t vcur = *(const volatile uint32_t *)(base + 0x7c8);
+    uint32_t vprev = *(const volatile uint32_t *)(base + 0x7cc);
+    for (int slot = 0; slot < 7; slot++) {
+        uint64_t cam = *(const volatile uint64_t *)(uintptr_t)(cm_ptr + 0xb8u + (uint64_t)slot * 8u);
+        if (!guest_range_ok(cam, 0x760, lo, hi)) continue;
+        uint64_t vptr = *(const volatile uint64_t *)(uintptr_t)cam;
+        uint64_t vt_off = (vptr >= MAIN_BASE) ? (vptr - MAIN_BASE) : 0;
+        if (vt_off != 0x88bc60ull) {
+            if (slot == 0 || (frame % 60 == 0)) {
+                LOG("[cam-probe] frame=%llu t_ms=%.1f slot=%d vt=+0x%llx dt=%.3f dv=%u\n",
+                    (unsigned long long)frame, t_ms, slot, (unsigned long long)vt_off,
+                    (double)dt_out, vcur - vprev);
+            }
+            continue;
+        }
+        const volatile uint8_t *cp = (const volatile uint8_t *)(uintptr_t)cam;
+        uint32_t active = *(const volatile uint32_t *)(cp + 0x150);
+        float eye_x = *(const volatile float *)(cp + 0x23c);
+        float eye_y = *(const volatile float *)(cp + 0x240);
+        float eye_z = *(const volatile float *)(cp + 0x244);
+        float look_x = *(const volatile float *)(cp + 0x2cc);
+        float look_y = *(const volatile float *)(cp + 0x2d0);
+        float look_z = *(const volatile float *)(cp + 0x2d4);
+        float teye_x = *(const volatile float *)(cp + 0x63c);
+        float teye_y = *(const volatile float *)(cp + 0x640);
+        float teye_z = *(const volatile float *)(cp + 0x644);
+        float tlook_x = *(const volatile float *)(cp + 0x624);
+        float tlook_y = *(const volatile float *)(cp + 0x628);
+        float tlook_z = *(const volatile float *)(cp + 0x62c);
+        float snap_t = *(const volatile float *)(cp + 0x710);
+        float blend_w = *(const volatile float *)(cp + 0x6dc);
+        uint16_t flg = *(const volatile uint16_t *)(cp + 0x668);
+        LOG("[cam-probe] frame=%llu t_ms=%.1f slot=%d active=%u dt=%.3f dv=%u flg=0x%x "
+            "eye=(%.4f,%.4f,%.4f) look=(%.4f,%.4f,%.4f) "
+            "teye=(%.4f,%.4f,%.4f) tlook=(%.4f,%.4f,%.4f) snap=%.2f blend=%.3f\n",
+            (unsigned long long)frame, t_ms, slot, active, (double)dt_out, vcur - vprev, (unsigned)flg,
+            (double)eye_x, (double)eye_y, (double)eye_z,
+            (double)look_x, (double)look_y, (double)look_z,
+            (double)teye_x, (double)teye_y, (double)teye_z,
+            (double)tlook_x, (double)tlook_y, (double)tlook_z,
+            (double)snap_t, (double)blend_w);
+    }
+}
 
 static void probe_log_snapshot(uint64_t frame, uint64_t now_ns, const char *reason, volatile uint8_t *base) {
     double t_ms = s_probe_t0_ns ? (double)(now_ns - s_probe_t0_ns) / 1e6 : 0.0;
@@ -495,7 +570,8 @@ void gl_backend_swap_buffers(void) {
     }
     bool want_exp_60fps = exp_60fps_enabled();
     bool need_probe = probe_60fps_enabled();
-    if (want_exp_60fps || need_probe) {
+    bool need_cam = probe_cam_enabled();
+    if (want_exp_60fps || need_probe || need_cam) {
         volatile uint8_t *pbase = yw1_v130_pacing_base(frame == 1);
         uint32_t pre_tgt = 0;
         uint32_t pre_base = 0;
@@ -548,6 +624,9 @@ void gl_backend_swap_buffers(void) {
                 probe_log_snapshot(frame, now_swap_ns, "movie_end", pbase);
             }
             s_probe_prev_movie = mov_now;
+        }
+        if (need_cam) {
+            probe_log_camera(frame, now_swap_ns, pbase);
         }
     }
     if (frame_should_dump(frame)) dump_frame_bmp(frame);

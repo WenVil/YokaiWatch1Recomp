@@ -23,6 +23,15 @@ from nso import Nso, R_AARCH64_RELATIVE
 
 SCRATCH_MEM = 0x7300000000
 
+# Build-ID-guarded conditional branch skip hooks emitted via rt_hook(c, pc).
+# When rt_hook returns non-zero at runtime, the conditional branch is skipped.
+BCOND_HOOK_SITES = {
+    ('main', 'B6E172353E696E65'): {
+        # ywCCamera_Rpg::Update+0x18e8 (`tbnz w19, #0, #0x19896c`): skips follow-cam interp init for odd (u32)dt.
+        0x198958,
+    },
+}
+
 
 def sext26(w):
     v = w & 0x03FFFFFF
@@ -50,6 +59,7 @@ class Module:
         self.cache = {}
         self.stats = Counter()
         self.mu = None
+        self.bcond_hooks = set()
 
     def in_text(self, a):
         return self.lo <= a < self.hi and a % 4 == 0
@@ -472,6 +482,12 @@ class Module:
             ext.add(end)
         return labels, ext, tables
 
+    def _emit_bcond(self, a, ins, jump):
+        """Emit C for a lifted conditional branch, honoring any Build-ID-guarded rt_hook site."""
+        if a in self.bcond_hooks:
+            return f'if (rt_hook(c, {hx(a)}) == 0 && ({ins.cond})) {{ {jump(ins.target)} }}'
+        return f'if ({ins.cond}) {{ {jump(ins.target)} }}'
+
     def render_single(self, ins, a, jump, refs, generic_mode=False):
         """C for one lifted instruction (no batching); used for patch variants."""
         k = ins.kind
@@ -482,7 +498,7 @@ class Module:
         if k == 'b':
             return [jump(ins.target)]
         if k == 'bcond':
-            return [f'if ({ins.cond}) {{ {jump(ins.target)} }}']
+            return [self._emit_bcond(a, ins, jump)]
         if k == 'bl':
             t = ins.target
             if self.in_text(t):
@@ -580,7 +596,7 @@ class Module:
             elif k == 'b':
                 out.append('    ' + jump(ins.target))
             elif k == 'bcond':
-                out.append(f'    if ({ins.cond}) {{ {jump(ins.target)} }}')
+                out.append('    ' + self._emit_bcond(a, ins, jump))
             elif k == 'bl':
                 t = ins.target
                 if self.in_text(t):
@@ -745,7 +761,7 @@ class Module:
                 elif k == 'b':
                     p_out.append('    ' + jump(ins.target))
                 elif k == 'bcond':
-                    p_out.append(f'    if ({ins.cond}) {{ {jump(ins.target)} }}')
+                    p_out.append('    ' + self._emit_bcond(a, ins, jump))
                 elif k == 'bl':
                     t = ins.target
                     if self.in_text(t):
@@ -843,6 +859,11 @@ def main():
 
     t0 = time.time()
     m = Module(args.name, args.nso, args.base, args.simd)
+    bid16 = m.nso.build_id[:16].upper()
+    m.bcond_hooks = {m.base + off for off in BCOND_HOOK_SITES.get((args.name, bid16), ())}
+    if m.bcond_hooks:
+        print(f'{args.name}: enabling {len(m.bcond_hooks)} Build-ID-guarded bcond hook(s) for {bid16}',
+              file=sys.stderr)
     version = None
     generic_mode = True
     if args.name == 'main':

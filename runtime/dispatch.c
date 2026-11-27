@@ -297,6 +297,24 @@ void rt_fatal_trace(void) {
     abort();
 }
 
+extern bool yw1_v130_cam60_fix_active(void);
+
+int rt_hook(Cpu *c, uint64_t site) {
+    (void)c;
+    // vyw1_jp_v1_3_0 (B6E172353E696E65) ywCCamera_Rpg::Update+0x18e8 (0x198958):
+    // `tbnz w19, #0` skips initializing Eye/LookAt interpolators whenever (uint32_t)dt is odd
+    // (dt == 1.0f at 60 FPS), freezing camera follow until jitter or hard-snap failsafe triggers.
+    if (site == MAIN_BASE + 0x198958ull && yw1_v130_cam60_fix_active()) {
+        static atomic_flag s_logged = ATOMIC_FLAG_INIT;
+        if (!atomic_flag_test_and_set(&s_logged)) {
+            LOG("[cam60-fix] active for vyw1_jp_v1_3_0 (B6E172353E696E65) at 0x%llx\n",
+                (unsigned long long)site);
+        }
+        return 1;
+    }
+    return 0;
+}
+
 void rt_udf(Cpu *c, uint64_t pc) {
     (void)c;
     FATAL("undefined instruction / trap at %llx\n", pc);
