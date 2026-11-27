@@ -51,7 +51,7 @@
 
 ### 第 1 步：下载并完整解压发行包
 
-下载 `YokaiWatch1Recomp-*-windows.zip`。
+从 [WenVil/YokaiWatch1Recomp Releases](https://github.com/WenVil/YokaiWatch1Recomp/releases) 页面（`https://github.com/WenVil/YokaiWatch1Recomp`）下载 **`YokaiWatch1Recomp-v1.0.0-beta1-windows.zip`**。
 
 > [!WARNING]
 > **务必先将整个 `.zip` 压缩包完整解压到可写的本地目录**（如 `D:\Games\YokaiWatch1Recomp\`），再进入解压目录双击 **`YokaiWatch1Recomp.exe`**。  

@@ -1,6 +1,6 @@
 # Building YokaiWatch1Recomp on Windows
 
-`YokaiWatch1Recomp` targets **Windows 10 / 11 (x86-64)** using **MSYS2 UCRT64** (`clang` + `lld` + **OpenGL 4.5** + **SDL3** + pure **LGPLv2.1+ FFmpeg**), producing `YokaiWatch1Recomp.exe` and a self-contained zero-copyright distributable archive (`YokaiWatch1Recomp-<version>-windows.zip`).
+`YokaiWatch1Recomp` ([WenVil/YokaiWatch1Recomp](https://github.com/WenVil/YokaiWatch1Recomp)) targets **Windows 10 / 11 (x86-64)** using **MSYS2 UCRT64** (`clang` + `lld` + **OpenGL 4.5** + **SDL3** + pure **LGPLv2.1+ FFmpeg**), producing `YokaiWatch1Recomp.exe` and a self-contained zero-copyright distributable archive (e.g., `YokaiWatch1Recomp-v1.0.0-beta1-windows.zip`).
 
 ---
 
@@ -79,7 +79,7 @@ Release hygiene checks enforced by `make dist`:
 - Zero compiled Switch guest functions (`llvm-nm build/YokaiWatch1Recomp.exe | grep ' f_70'` must be empty).
 - Zero GPL FFmpeg / encoder DLLs (`libx264`, `libx265`, `libxvidcore`, `postproc`) or `vulkan` / `shaderc` DLLs.
 - Only minimal non-system DLLs are staged (`SDL3.dll`, `avcodec-63.dll`, `avformat-63.dll`, `avutil-61.dll`, `swscale-10.dll`, `libiconv-2.dll`, `libgcc_s_seh-1.dll`, `libwinpthread-1.dll`, `libstdc++-6.dll`).
-- Output folder and archive: `build/dist/YokaiWatch1Recomp/` and `build/dist/YokaiWatch1Recomp-<version>-windows.zip`.
+- Output folder and release archive: `YokaiWatch1Recomp-v1.0.0-beta1-windows/` and `YokaiWatch1Recomp-v1.0.0-beta1-windows.zip` (or `YokaiWatch1Recomp-<version>-windows.zip`).
 
 ---
 

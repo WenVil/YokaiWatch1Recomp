@@ -2,7 +2,7 @@
   "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
   "format": 1,
   "name": "YokaiWatch1Recomp",
-  "repo": "YokaiWatch1Recomp/YokaiWatch1Recomp",
+  "repo": "WenVil/YokaiWatch1Recomp",
   "inputs": [
     {
       "id": "game",

@@ -51,7 +51,7 @@ A native Windows PC static recompilation runtime for *Yo-kai Watch 1* (Nintendo 
 
 ### 1. Download and Extract Completely
 
-Download `YokaiWatch1Recomp-*-windows.zip`.
+Download **`YokaiWatch1Recomp-v1.0.0-beta1-windows.zip`** from the [WenVil/YokaiWatch1Recomp Releases](https://github.com/WenVil/YokaiWatch1Recomp/releases) page (`https://github.com/WenVil/YokaiWatch1Recomp`).
 
 > [!WARNING]
 > **Extract the entire `.zip` archive to a writable local folder** (for example, `D:\Games\YokaiWatch1Recomp\`) before running **`YokaiWatch1Recomp.exe`**.  
