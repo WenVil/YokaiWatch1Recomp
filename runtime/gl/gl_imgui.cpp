@@ -52,7 +52,7 @@
 #endif
 
 extern "C" {
-bool menu_prepare_frame(uint32_t target_h, bool loading);
+bool menu_prepare_frame(uint32_t target_h, float pixel_density, bool loading);
 void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_density);
 void menu_set_open_for_test(bool open);
 void menu_set_tab_for_test(int tab_idx);
@@ -184,18 +184,28 @@ void gl_imgui_launcher_end_frame(int pix_w, int pix_h) {
     ensure_gl_procs();
     ImGui::SetCurrentContext(s_launcher_ctx);
     ImGui::Render();
+    ImDrawData *dd = ImGui::GetDrawData();
+    int fb_w = pix_w, fb_h = pix_h;
+    if (dd && dd->DisplaySize.x > 0.0f && dd->DisplaySize.y > 0.0f) {
+        int dw = (int)(dd->DisplaySize.x * dd->FramebufferScale.x + 0.5f);
+        int dh = (int)(dd->DisplaySize.y * dd->FramebufferScale.y + 0.5f);
+        if (dw > 0 && dh > 0) {
+            fb_w = dw;
+            fb_h = dh;
+        }
+    }
 
     if (s_gl.p_glBindFramebuffer) s_gl.p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (s_gl.p_glDrawBuffer) s_gl.p_glDrawBuffer(GL_BACK);
     if (s_gl.p_glIsEnabled && s_gl.p_glDisable && s_gl.p_glIsEnabled(GL_FRAMEBUFFER_SRGB)) {
         s_gl.p_glDisable(GL_FRAMEBUFFER_SRGB);
     }
-    if (s_gl.p_glViewport) s_gl.p_glViewport(0, 0, pix_w, pix_h);
+    if (s_gl.p_glViewport) s_gl.p_glViewport(0, 0, fb_w, fb_h);
     if (s_gl.p_glClearColor && s_gl.p_glClear) {
         s_gl.p_glClearColor(0.05f, 0.06f, 0.09f, 1.0f);
         s_gl.p_glClear(GL_COLOR_BUFFER_BIT);
     }
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    ImGui_ImplOpenGL3_RenderDrawData(dd);
     if (s_launcher_win) SDL_GL_SwapWindow(s_launcher_win);
     drain_gl_errors_into(0, false);
 }
@@ -230,14 +240,18 @@ void gl_imgui_overlay_new_frame(void) {
 void gl_imgui_overlay_render_draw_data(void *draw_data_ptr, int pix_w, int pix_h, uint64_t frame_num) {
     ImDrawData *dd = (ImDrawData *)draw_data_ptr;
     if (!dd || dd->TotalVtxCount <= 0 || pix_w <= 0 || pix_h <= 0) return;
+    int fb_w = (int)(dd->DisplaySize.x * dd->FramebufferScale.x + 0.5f);
+    int fb_h = (int)(dd->DisplaySize.y * dd->FramebufferScale.y + 0.5f);
+    if (fb_w <= 0) fb_w = pix_w;
+    if (fb_h <= 0) fb_h = pix_h;
     ensure_gl_procs();
 
     // Flush any pre-existing guest errors before drawing overlay so attribution is exact.
     drain_gl_errors_into(frame_num, false);
 
     GLint prev_draw_fbo = 0, prev_read_fbo = 0, prev_draw_buf = 0;
-    GLint prev_vp[4] = {0, 0, pix_w, pix_h};
-    GLint prev_scissor_box[4] = {0, 0, pix_w, pix_h};
+    GLint prev_vp[4] = {0, 0, fb_w, fb_h};
+    GLint prev_scissor_box[4] = {0, 0, fb_w, fb_h};
     GLboolean prev_scissor = GL_FALSE;
     GLboolean prev_srgb = GL_FALSE;
 
@@ -257,7 +271,7 @@ void gl_imgui_overlay_render_draw_data(void *draw_data_ptr, int pix_w, int pix_h
     if (s_gl.p_glDrawBuffer) s_gl.p_glDrawBuffer(GL_BACK);
     if (prev_srgb && s_gl.p_glDisable) s_gl.p_glDisable(GL_FRAMEBUFFER_SRGB);
     if (prev_scissor && s_gl.p_glDisable) s_gl.p_glDisable(GL_SCISSOR_TEST);
-    if (s_gl.p_glViewport) s_gl.p_glViewport(0, 0, pix_w, pix_h);
+    if (s_gl.p_glViewport) s_gl.p_glViewport(0, 0, fb_w, fb_h);
 
     ImGui_ImplOpenGL3_RenderDrawData(dd);
 
@@ -306,38 +320,8 @@ bool gl_imgui_consume_window_apply(void) {
 }
 
 void gl_imgui_render_in_game_overlay(uint64_t frame_num, int win_w, int win_h, int pix_w, int pix_h, float pixel_density) {
-    static int test_checked = -1;
-    if (test_checked < 0) {
-        const char *env = getenv("YW1_OVERLAY_TEST");
-        test_checked = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
-    }
-    if (test_checked == 1) {
-        if (frame_num == 480) {
-            g_settings.hud_mode = HUD_DETAILED;
-            g_settings.show_fps = true;
-            menu_set_open_for_test(true);
-            menu_set_tab_for_test(0);
-            LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST opened overlay (tab=0 Display) + HUD_DETAILED\n",
-                (unsigned long long)frame_num);
-        } else if (frame_num == 500) {
-            menu_set_tab_for_test(1);
-            LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST switched tab=1 (Audio)\n", (unsigned long long)frame_num);
-        } else if (frame_num == 515) {
-            menu_set_tab_for_test(8);
-            LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST switched tab=8 (Controls)\n", (unsigned long long)frame_num);
-        } else if (frame_num == 530) {
-            menu_set_tab_for_test(9);
-            LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST switched tab=9 (System)\n", (unsigned long long)frame_num);
-        } else if (frame_num == 540) {
-            menu_set_open_for_test(false);
-            LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST closed overlay, keeping HUD_DETAILED (frames=%llu glErrors=%llu)\n",
-                (unsigned long long)frame_num,
-                (unsigned long long)s_overlay_frames.load(std::memory_order_relaxed),
-                (unsigned long long)s_overlay_gl_errors.load(std::memory_order_relaxed));
-        }
-    }
-
-    if (!menu_prepare_frame((uint32_t)(pix_h > 0 ? pix_h : 720), gl_backend_is_loading())) return;
+    (void)frame_num;
+    if (!menu_prepare_frame((uint32_t)(win_h > 0 ? win_h : 720), pixel_density, gl_backend_is_loading())) return;
     menu_render_opengl(win_w, win_h, pix_w, pix_h, pixel_density);
 }
 

@@ -24,6 +24,8 @@ void *gl_backend_context(void);
 bool gl_backend_window_focused(void);
 void gl_backend_window_set_title(const char *title);
 void gl_backend_get_cached_metrics(int *win_w, int *win_h, int *pix_w, int *pix_h, float *density);
+float gl_backend_display_scale(void);
+void gl_backend_refresh_metrics(void);
 void gl_backend_apply_window_settings(void);
 void gl_backend_apply_pending_vsync(void);
 void gl_backend_set_loading(bool loading);

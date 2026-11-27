@@ -718,6 +718,32 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
     int smoke_max_missing = 0;
     int smoke_saved_ui_lang = g_settings.ui_lang;
     bool smoke_exit_ok = true;
+    float smoke_hit_tx = 0.0f, smoke_hit_ty = 0.0f;
+    bool smoke_rect_ready = false;
+    bool smoke_def_hov = false, smoke_def_clk = false;
+    bool smoke_res_hov = false, smoke_res_clk = false;
+    if (smoke_on) {
+        SDL_SetWindowFocusable(win, false);
+    }
+    auto smoke_push_motion = [&](float x, float y) {
+        SDL_Event ev = {};
+        ev.type = SDL_EVENT_MOUSE_MOTION;
+        ev.motion.windowID = SDL_GetWindowID(win);
+        ev.motion.x = x;
+        ev.motion.y = y;
+        SDL_PushEvent(&ev);
+    };
+    auto smoke_push_btn = [&](bool down, float x, float y) {
+        SDL_Event ev = {};
+        ev.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+        ev.button.windowID = SDL_GetWindowID(win);
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.down = down;
+        ev.button.clicks = 1;
+        ev.button.x = x;
+        ev.button.y = y;
+        SDL_PushEvent(&ev);
+    };
 
     long shot_at = getenv("LARECOMP_LAUNCHER_SHOT") ? atol(getenv("LARECOMP_LAUNCHER_SHOT")) : 0, frame = 0;
     bool open_lang_popup = getenv("LARECOMP_OPEN_LANG_POPUP") != NULL;
@@ -903,11 +929,35 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
             } else if (smoke_frame == 8) {
                 g_settings.ui_lang = UI_LANG_EN;
                 g_tab_request_ext = 9;
-            } else if (smoke_frame >= 10) {
+            } else if (smoke_frame == 10) {
+                view = VIEW_HOME;
+                smoke_rect_ready = false;
+            } else if (smoke_frame == 11 && smoke_rect_ready) {
+                smoke_push_motion(smoke_hit_tx, smoke_hit_ty);
+            } else if (smoke_frame == 12) {
+                smoke_push_btn(true, smoke_hit_tx, smoke_hit_ty);
+            } else if (smoke_frame == 13) {
+                smoke_push_btn(false, smoke_hit_tx, smoke_hit_ty);
+            } else if (smoke_frame == 14) {
+                SDL_SetWindowSize(win, 1600, 900);
+                SDL_SyncWindow(win);
+                gl_backend_refresh_metrics();
+                smoke_rect_ready = false;
+            } else if (smoke_frame == 16 && smoke_rect_ready) {
+                smoke_push_motion(smoke_hit_tx, smoke_hit_ty);
+            } else if (smoke_frame == 17) {
+                smoke_push_btn(true, smoke_hit_tx, smoke_hit_ty);
+            } else if (smoke_frame == 18) {
+                smoke_push_btn(false, smoke_hit_tx, smoke_hit_ty);
+            } else if (smoke_frame >= 19) {
                 g_settings.ui_lang = smoke_saved_ui_lang;
-                smoke_exit_ok = (smoke_max_missing == 0 && smoke_rebuilds >= 2 && gl_imgui_gl_error_count() == 0);
-                fprintf(stderr, "[ui-smoke] DONE langs_checked=5 missing_max=%d font_rebuilds=%d glErrors=%llu status=%s\n",
-                        smoke_max_missing, smoke_rebuilds, (unsigned long long)gl_imgui_gl_error_count(),
+                smoke_exit_ok = (smoke_max_missing == 0 && smoke_rebuilds >= 2 && gl_imgui_gl_error_count() == 0 &&
+                                 smoke_def_hov && smoke_def_clk && smoke_res_hov && smoke_res_clk);
+                fprintf(stderr, "[ui-smoke] DONE langs_checked=5 missing_max=%d font_rebuilds=%d hit_default=%s hit_resized=%s glErrors=%llu status=%s\n",
+                        smoke_max_missing, smoke_rebuilds,
+                        (smoke_def_hov && smoke_def_clk) ? "PASS" : "FAIL",
+                        (smoke_res_hov && smoke_res_clk) ? "PASS" : "FAIL",
+                        (unsigned long long)gl_imgui_gl_error_count(),
                         smoke_exit_ok ? "PASS" : "FAIL");
                 break;
             }
@@ -949,6 +999,14 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_WINDOW_RESIZED ||
+                e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+                e.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED ||
+                e.type == SDL_EVENT_WINDOW_MOVED ||
+                e.type == SDL_EVENT_WINDOW_MAXIMIZED ||
+                e.type == SDL_EVENT_WINDOW_RESTORED) {
+                gl_backend_refresh_metrics();
+            }
             input_cursor_event(&e);
             if (view == VIEW_SETTINGS && bind_capture_event(&e)) continue;
             if (!launcher_pad_event(e)) gl_imgui_launcher_process_event(&e);
@@ -959,13 +1017,14 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
         }
 
         {
+            compute_hidpi_metrics(win, &sc, &pix_density, &raster_scale);
             if (input_cursor_hidden()) io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
             else io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+            // Fonts are already rasterized at physical pixels (sc * pix_density); invert pix_density BEFORE NewFrame()
+            io.FontGlobalScale = 1.0f / pix_density;
             gl_imgui_launcher_begin_frame();
             if (SDL_HasGamepad()) io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
 
-            // Fonts are already rasterized at physical pixels (sc * pix_density); only invert pix_density for logical points
-            io.FontGlobalScale = 1.0f / pix_density;
             ImVec2 ds = io.DisplaySize;
 
             if (view == VIEW_LOADING) {
@@ -1038,13 +1097,53 @@ extern "C" void launcher_run(const char *initial_root, bool *out_prepared) {
                         if (active) { ImGui::PopStyleVar(); ImGui::PopStyleColor(2); }
                         return hit;
                     };
-                    if (nav_btn(ui_tr(STR_NAV_HOME), view == VIEW_HOME)) {
+                    bool home_clicked = nav_btn(ui_tr(STR_NAV_HOME), view == VIEW_HOME);
+                    if (smoke_on && view == VIEW_SETTINGS) {
+                        ImVec2 bmin = ImGui::GetItemRectMin(), bmax = ImGui::GetItemRectMax();
+                        float cx = (bmin.x + bmax.x) * 0.5f, cy = (bmin.y + bmax.y) * 0.5f;
+                        if (smoke_frame == 16 && !smoke_rect_ready) {
+                            smoke_hit_tx = cx; smoke_hit_ty = cy; smoke_rect_ready = true;
+                        } else if (smoke_frame == 17 && smoke_rect_ready) {
+                            float err = hypotf(io.MousePos.x - smoke_hit_tx, io.MousePos.y - smoke_hit_ty);
+                            bool hov = ImGui::IsItemHovered();
+                            if (err < 1.0f && hov) smoke_res_hov = true;
+                            int w_w = 0, w_h = 0, p_w = 0, p_h = 0;
+                            float d_dens = 1.0f;
+                            gl_backend_get_cached_metrics(&w_w, &w_h, &p_w, &p_h, &d_dens);
+                            fprintf(stderr, "[ui-smoke] hit_test stage=A mode=resized win=%dx%d pix=%dx%d disp_scale=%.3f DisplaySize=(%.0f,%.0f) fb_scale=(%.3f,%.3f) target=(%.1f,%.1f) mouse=(%.1f,%.1f) err=%.3f hovered=%d\n",
+                                    w_w, w_h, p_w, p_h, gl_backend_display_scale(),
+                                    io.DisplaySize.x, io.DisplaySize.y, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y,
+                                    smoke_hit_tx, smoke_hit_ty, io.MousePos.x, io.MousePos.y, err, hov ? 1 : 0);
+                        }
+                    }
+                    if (home_clicked) {
+                        if (smoke_on && smoke_frame >= 17) smoke_res_clk = true;
                         bind_capture_cancel();
                         settings_save();
                         view = VIEW_HOME;
                     }
                     ImGui::SameLine(0, 8.0f * sc);
-                    if (nav_btn(ui_tr(STR_NAV_SETTINGS), view == VIEW_SETTINGS)) {
+                    bool settings_clicked = nav_btn(ui_tr(STR_NAV_SETTINGS), view == VIEW_SETTINGS);
+                    if (smoke_on && view == VIEW_HOME) {
+                        ImVec2 bmin = ImGui::GetItemRectMin(), bmax = ImGui::GetItemRectMax();
+                        float cx = (bmin.x + bmax.x) * 0.5f, cy = (bmin.y + bmax.y) * 0.5f;
+                        if (smoke_frame == 11 && !smoke_rect_ready) {
+                            smoke_hit_tx = cx; smoke_hit_ty = cy; smoke_rect_ready = true;
+                        } else if (smoke_frame == 12 && smoke_rect_ready) {
+                            float err = hypotf(io.MousePos.x - smoke_hit_tx, io.MousePos.y - smoke_hit_ty);
+                            bool hov = ImGui::IsItemHovered();
+                            if (err < 1.0f && hov) smoke_def_hov = true;
+                            int w_w = 0, w_h = 0, p_w = 0, p_h = 0;
+                            float d_dens = 1.0f;
+                            gl_backend_get_cached_metrics(&w_w, &w_h, &p_w, &p_h, &d_dens);
+                            fprintf(stderr, "[ui-smoke] hit_test stage=A mode=default win=%dx%d pix=%dx%d disp_scale=%.3f DisplaySize=(%.0f,%.0f) fb_scale=(%.3f,%.3f) target=(%.1f,%.1f) mouse=(%.1f,%.1f) err=%.3f hovered=%d\n",
+                                    w_w, w_h, p_w, p_h, gl_backend_display_scale(),
+                                    io.DisplaySize.x, io.DisplaySize.y, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y,
+                                    smoke_hit_tx, smoke_hit_ty, io.MousePos.x, io.MousePos.y, err, hov ? 1 : 0);
+                        }
+                    }
+                    if (settings_clicked) {
+                        if (smoke_on && smoke_frame >= 12 && smoke_frame <= 15) smoke_def_clk = true;
                         static bool opened_once = false;
                         menu_tabs_focus(!opened_once);
                         opened_once = true;
@@ -1689,8 +1788,9 @@ extern "C" void launcher_loading_boot(const char *root) {
                 exit(0);
             }
         }
-        gl_imgui_launcher_begin_frame();
+        compute_hidpi_metrics(win, &sc, &pix_density, &raster_scale);
         io.FontGlobalScale = 1.0f / pix_density;
+        gl_imgui_launcher_begin_frame();
         double el = (SDL_GetTicks() / 1000.0) - boot_t0;
         int stg = __atomic_load_n(&boot_args.stage, __ATOMIC_ACQUIRE);
         ui_draw_loading_visual(el, stg, nullptr, sc, f_title, f_menu);

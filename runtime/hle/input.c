@@ -493,26 +493,41 @@ static void apply_keyboard_update(void) {
 static bool touch_mouse_down;
 
 static bool window_to_touch_coords(float wx, float wy, int *tx, int *ty) {
+    int pt_w = 0, pt_h = 0, cached_pw = 0, cached_ph = 0;
+    gl_backend_get_cached_metrics(&pt_w, &pt_h, &cached_pw, &cached_ph, NULL);
     SDL_Window *win = gl_backend_window();
-    int pt_w = 0, pt_h = 0;
-    if (win) SDL_GetWindowSize(win, &pt_w, &pt_h);
+    if (win && (pt_w <= 0 || pt_h <= 0)) SDL_GetWindowSize(win, &pt_w, &pt_h);
     int vx = 0, vy = 0, vw = 0, vh = 0, ww = 0, wh = 0;
     gl_hle_get_viewport_rect(&vx, &vy, &vw, &vh, &ww, &wh);
     if (pt_w <= 0 || pt_h <= 0 || vw <= 0 || vh <= 0 || ww <= 0 || wh <= 0) {
         *tx = 640; *ty = 360;
         return false;
     }
-    double px = (double)wx * ((double)ww / (double)pt_w);
-    double py_top = (double)wy * ((double)wh / (double)pt_h);
-    double top_y = (double)(wh - (vy + vh));
-    double rx = (px - (double)vx) / (double)vw;
-    double ry = (py_top - top_y) / (double)vh;
+    double nx = (double)wx / (double)pt_w;
+    double ny = (double)wy / (double)pt_h;
+    double v_left = (double)vx / (double)ww;
+    double v_w = (double)vw / (double)ww;
+    double v_top = (double)(wh - (vy + vh)) / (double)wh;
+    double v_h = (double)vh / (double)wh;
+    double rx = (nx - v_left) / v_w;
+    double ry = (ny - v_top) / v_h;
     bool inside = (rx >= 0.0 && rx < 1.0 && ry >= 0.0 && ry < 1.0);
     int ix = (int)(rx * 1280.0);
     int iy = (int)(ry * 720.0);
     *tx = ix < 0 ? 0 : ix > 1279 ? 1279 : ix;
     *ty = iy < 0 ? 0 : iy > 719 ? 719 : iy;
     return inside;
+}
+
+bool input_verify_window_to_touch(int *out_tx, int *out_ty) {
+    int pt_w = 0, pt_h = 0;
+    gl_backend_get_cached_metrics(&pt_w, &pt_h, NULL, NULL, NULL);
+    if (pt_w <= 0 || pt_h <= 0) return false;
+    int tx = -1, ty = -1;
+    bool ok = window_to_touch_coords((float)pt_w * 0.5f, (float)pt_h * 0.5f, &tx, &ty);
+    if (out_tx) *out_tx = tx;
+    if (out_ty) *out_ty = ty;
+    return ok && abs(tx - 640) <= 1 && abs(ty - 360) <= 1;
 }
 
 void input_handle_event(const SDL_Event *e) {

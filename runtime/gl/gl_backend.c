@@ -40,6 +40,7 @@ static atomic_int s_win_h = 720;
 static atomic_int s_pix_w = 1280;
 static atomic_int s_pix_h = 720;
 static atomic_int s_density_x1000 = 1000;
+static atomic_int s_disp_scale_x1000 = 1000;
 static atomic_bool s_loading = false;
 static atomic_int s_pending_swap_interval = -99;
 
@@ -72,18 +73,29 @@ static void update_cached_metrics_main_thread(SDL_Window *win) {
     int ww = 1280, wh = 720, pw = 1280, ph = 720;
     SDL_GetWindowSize(win, &ww, &wh);
     SDL_GetWindowSizeInPixels(win, &pw, &ph);
-    float sc = SDL_GetWindowDisplayScale(win);
+    float pd = SDL_GetWindowPixelDensity(win);
+    float ds = SDL_GetWindowDisplayScale(win);
     if (ww <= 0) ww = 1280;
     if (wh <= 0) wh = 720;
     if (pw <= 0) pw = ww;
     if (ph <= 0) ph = wh;
-    if (sc < 0.5f || sc > 8.0f) sc = (float)pw / (float)ww;
-    if (sc < 0.5f) sc = 1.0f;
+    if (pd < 0.5f || pd > 8.0f) pd = (float)pw / (float)ww;
+    if (pd < 0.5f) pd = 1.0f;
+    if (ds < 0.5f || ds > 8.0f) ds = pd;
     atomic_store_explicit(&s_win_w, ww, memory_order_relaxed);
     atomic_store_explicit(&s_win_h, wh, memory_order_relaxed);
     atomic_store_explicit(&s_pix_w, pw, memory_order_relaxed);
     atomic_store_explicit(&s_pix_h, ph, memory_order_relaxed);
-    atomic_store_explicit(&s_density_x1000, (int)(sc * 1000.0f + 0.5f), memory_order_relaxed);
+    atomic_store_explicit(&s_density_x1000, (int)(pd * 1000.0f + 0.5f), memory_order_relaxed);
+    atomic_store_explicit(&s_disp_scale_x1000, (int)(ds * 1000.0f + 0.5f), memory_order_relaxed);
+}
+
+void gl_backend_refresh_metrics(void) {
+    update_cached_metrics_main_thread(s_window);
+}
+
+float gl_backend_display_scale(void) {
+    return (float)atomic_load_explicit(&s_disp_scale_x1000, memory_order_relaxed) / 1000.0f;
 }
 
 bool gl_backend_is_active(void) {
@@ -294,6 +306,7 @@ void gl_backend_apply_window_settings(void) {
         SDL_SetWindowFullscreen(s_window, false);
         SDL_SetWindowSize(s_window, req_w, req_h);
     }
+    SDL_SyncWindow(s_window);
     atomic_store_explicit(&s_pending_swap_interval, vsync_interval_from_settings(), memory_order_release);
     update_cached_metrics_main_thread(s_window);
 }
@@ -416,7 +429,11 @@ int gl_backend_run(void) {
                 update_cached_metrics_main_thread(s_window);
             } else if (e.type == SDL_EVENT_WINDOW_RESIZED ||
                        e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
-                       e.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+                       e.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED ||
+                       e.type == SDL_EVENT_WINDOW_MOVED ||
+                       e.type == SDL_EVENT_WINDOW_MAXIMIZED ||
+                       e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN ||
+                       e.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN) {
                 update_cached_metrics_main_thread(s_window);
             }
             if (e.type == SDL_EVENT_QUIT) {

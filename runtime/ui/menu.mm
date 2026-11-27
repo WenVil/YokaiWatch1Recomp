@@ -24,6 +24,7 @@ extern "C" {
 #include "../gl/gl_imgui.h"
 #include "menu.h"
 void input_reset(void);
+bool input_verify_window_to_touch(int *out_tx, int *out_ty);
 void controls_tab_draw(float scale);  // controls_ui.mm
 bool controls_ui_took_back(void);
 #include "../input_bind.h"
@@ -50,7 +51,43 @@ struct QEvent {
 };
 static pthread_mutex_t q_lock = PTHREAD_MUTEX_INITIALIZER;
 static std::vector<QEvent> q_events;
-static float g_pixel_density = 1;
+
+static int s_btest_enabled = -1;
+static int s_btest_step = 0;  // 0=wait_open, 1=def_capture, 2=def_hover_click, 3=tabs, 4=wait_resize, 5=res_capture, 6=res_hover_click, 7=done
+static uint64_t s_btest_step_frame = 0;
+static float s_btest_tx = 0.0f, s_btest_ty = 0.0f;
+static bool s_btest_rect_ready = false;
+static bool s_btest_def_hov = false, s_btest_def_clk = false;
+static bool s_btest_res_hov = false, s_btest_res_clk = false;
+static bool s_btest_down_sent = false;
+static bool s_btest_up_sent = false;
+static bool s_btest_touch_ok = false;
+static int s_btest_touch_x = -1, s_btest_touch_y = -1;
+
+static void btest_push_sdl_motion(float x, float y) {
+    SDL_Window *w = gl_backend_window();
+    if (!w) return;
+    SDL_Event ev = {};
+    ev.type = SDL_EVENT_MOUSE_MOTION;
+    ev.motion.windowID = SDL_GetWindowID(w);
+    ev.motion.x = x;
+    ev.motion.y = y;
+    SDL_PushEvent(&ev);
+}
+
+static void btest_push_sdl_btn(bool down, float x, float y) {
+    SDL_Window *w = gl_backend_window();
+    if (!w) return;
+    SDL_Event ev = {};
+    ev.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    ev.button.windowID = SDL_GetWindowID(w);
+    ev.button.button = SDL_BUTTON_LEFT;
+    ev.button.down = down;
+    ev.button.clicks = 1;
+    ev.button.x = x;
+    ev.button.y = y;
+    SDL_PushEvent(&ev);
+}
 
 static void push(const QEvent &e) {
     pthread_mutex_lock(&q_lock);
@@ -268,7 +305,7 @@ bool menu_handle_event(const SDL_Event *e) {
     }
     case SDL_EVENT_MOUSE_MOTION:
         if (!capturing() && !vpad_on()) return false;
-        { QEvent q = {}; q.kind = QEvent::MOUSE_POS; q.x = e->motion.x * g_pixel_density; q.y = e->motion.y * g_pixel_density; push(q); }
+        { QEvent q = {}; q.kind = QEvent::MOUSE_POS; q.x = e->motion.x; q.y = e->motion.y; push(q); }
         return true;
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
         if (!capturing() && !vpad_on()) return false;
@@ -292,7 +329,6 @@ bool menu_handle_event(const SDL_Event *e) {
 extern "C" uint32_t g_window_resize_request;  // (test scripts: runtime/hle/input.c "resize")
 void menu_apply_window_requests(void *win) {
     SDL_Window *w = (SDL_Window *)win;
-    if (w) g_pixel_density = SDL_GetWindowPixelDensity(w);
     static bool text_input;
     bool want_text = capturing();
     if (w && want_text != text_input) {
@@ -311,7 +347,11 @@ void menu_apply_window_requests(void *win) {
         gl_backend_apply_window_settings();
     }
     if (uint32_t r = __atomic_exchange_n(&g_window_resize_request, 0u, __ATOMIC_RELAXED)) {
-        if (w) SDL_SetWindowSize(w, (int)(r >> 16), (int)(r & 0xffff));
+        if (w) {
+            SDL_SetWindowSize(w, (int)(r >> 16), (int)(r & 0xffff));
+            SDL_SyncWindow(w);
+            gl_backend_refresh_metrics();
+        }
     }
 }
 
@@ -320,7 +360,7 @@ static bool g_inited;
 static ImGuiContext *g_ctx;  // ours: the start screen (back to it after a reboot) has its own context
 static ImFont *g_font, *g_font_big;
 static ImFont *g_menu_font, *g_menu_font_big;
-static float g_built_font_scale = -1.0f;
+static float g_built_raster_scale = -1.0f;
 static int g_built_ui_lang = -1;
 static int g_tab, g_tab_request = -2;  // (-2: no request; -1 is the Prelaunch tab)
 static int g_focus_tab = -99;  // put the nav cursor on this tab next frame (-100: the selected one; -99: none)
@@ -341,23 +381,24 @@ static void style_init(void) {
     ui_apply_yw1_theme(1.0f);
 }
 
-static void ensure_fonts(float scale, bool allow_gl_rebuild) {
-    float fsc = scale;
+static void ensure_fonts(float scale, float pix_density, bool allow_gl_rebuild) {
+    float pd = (pix_density >= 0.5f && pix_density <= 8.0f) ? pix_density : 1.0f;
+    float fsc = scale * pd;
     if (fsc < 0.55f) fsc = 0.55f;
-    if (fsc > 2.5f) fsc = 2.5f;
+    if (fsc > 5.0f) fsc = 5.0f;
     int lang = ui_resolve_lang();
-    if (g_built_font_scale > 0.0f && g_built_ui_lang == lang && fabsf(g_built_font_scale - fsc) <= 0.04f) return;
+    if (g_built_raster_scale > 0.0f && g_built_ui_lang == lang && fabsf(g_built_raster_scale - fsc) <= 0.04f) return;
     if (g_inited && !allow_gl_rebuild) return;
     ui_load_i18n_fonts(&g_font, &g_menu_font, &g_font_big, 28.0f * fsc, 32.0f * fsc, 42.0f * fsc, lang, nullptr, nullptr);
     g_menu_font_big = g_font_big;
-    g_built_font_scale = fsc;
+    g_built_raster_scale = fsc;
     g_built_ui_lang = lang;
     if (g_inited) {
         gl_imgui_fonts_rebuild();
     }
 }
 
-static void init(float scale) {
+static void init(float scale, float pix_density) {
     IMGUI_CHECKVERSION();
     g_ctx = ImGui::CreateContext();
     ImGui::SetCurrentContext(g_ctx);
@@ -365,8 +406,8 @@ static void init(float scale) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     io.IniFilename = NULL;
-    g_built_font_scale = -1.0f;
-    ensure_fonts(scale, true);
+    g_built_raster_scale = -1.0f;
+    ensure_fonts(scale, pix_density, true);
     style_init();
     gl_imgui_overlay_init();
     g_inited = true;
@@ -1018,7 +1059,45 @@ static bool render_needed(bool open, bool kbd) {
     return open || kbd || g_settings.hud_mode != HUD_OFF || g_settings.show_fps || rt_speed_pct() > 100 || vpad_on();
 }
 
-extern "C" bool menu_prepare_frame(uint32_t target_h, bool loading) {
+extern "C" bool menu_prepare_frame(uint32_t target_h, float pixel_density, bool loading) {
+    if (s_btest_enabled < 0) {
+        const char *env = getenv("YW1_OVERLAY_TEST");
+        s_btest_enabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    if (s_btest_enabled == 1 && !loading) {
+        uint64_t f = gl_backend_present_count();
+        if (s_btest_step == 0 && f >= 480) {
+            g_settings.hud_mode = HUD_DETAILED;
+            g_settings.show_fps = true;
+            menu_set_open_for_test(true);
+            menu_set_tab_for_test(0);
+            s_btest_rect_ready = false;
+            s_btest_step = 1;
+            s_btest_step_frame = f;
+            LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST opened overlay (tab=0 Display) + HUD_DETAILED\n",
+                (unsigned long long)f);
+        } else if (s_btest_step == 3) {
+            uint64_t dt = f - s_btest_step_frame;
+            if (dt == 1) {
+                menu_set_open_for_test(true);
+                menu_set_tab_for_test(1);
+                LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST switched tab=1 (Audio)\n", (unsigned long long)f);
+            } else if (dt == 3) {
+                menu_set_tab_for_test(8);
+                LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST switched tab=8 (Controls)\n", (unsigned long long)f);
+            } else if (dt == 5) {
+                menu_set_tab_for_test(9);
+                LOG("[ui-test] frame=%llu YW1_OVERLAY_TEST switched tab=9 (System)\n", (unsigned long long)f);
+            } else if (dt >= 7) {
+                menu_set_open_for_test(true);
+                menu_set_tab_for_test(0);
+                g_window_resize_request = (1600u << 16) | 900u;
+                s_btest_rect_ready = false;
+                s_btest_step = 4;
+                s_btest_step_frame = f;
+            }
+        }
+    }
     if (!loading) {
         bool open = g_open.load();
         bool kbd = g_kbd.load() == 1;
@@ -1028,20 +1107,25 @@ extern "C" bool menu_prepare_frame(uint32_t target_h, bool loading) {
             return false;
         }
     }
-    float th = target_h > 0 ? (float)target_h : 1080.0f;
+    float th = target_h > 0 ? (float)target_h : 720.0f;
     float scale = th / 1080.0f;
     if (scale < 0.45f) scale = 0.45f;
-    if (!g_inited) init(scale);
+    if (scale > 2.5f) scale = 2.5f;
+    float pd = (pixel_density >= 0.5f && pixel_density <= 8.0f) ? pixel_density : 1.0f;
+    if (!g_inited) init(scale, pd);
     ImGui::SetCurrentContext(g_ctx);
     if (!ImGui::GetIO().BackendRendererUserData) gl_imgui_overlay_init();
-    ensure_fonts(scale, true);
+    ensure_fonts(scale, pd, true);
     return true;
 }
 
 void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_density) {
-    (void)win_w; (void)win_h;
-    if (pixel_density > 0.1f) g_pixel_density = pixel_density;
-    const double tw = pix_w > 0 ? pix_w : 1280.0, th = pix_h > 0 ? pix_h : 720.0;
+    int ww = win_w > 0 ? win_w : 1280, wh = win_h > 0 ? win_h : 720;
+    int pw = pix_w > 0 ? pix_w : ww, ph = pix_h > 0 ? pix_h : wh;
+    float fb_sx = (float)pw / (float)ww;
+    float fb_sy = (float)ph / (float)wh;
+    float pd = (pixel_density >= 0.5f && pixel_density <= 8.0f) ? pixel_density : (fb_sx + fb_sy) * 0.5f;
+    if (pd < 0.5f) pd = 1.0f;
     bool open = g_open.load();
     bool kbd = g_kbd.load() == 1;
     bool loading = gl_backend_is_loading();
@@ -1056,16 +1140,17 @@ void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_
         g_ov_same = 0;
         return;
     }
-    float scale = (float)(th / 1080.0);
+    float scale = (float)wh / 1080.0f;
     if (scale < 0.45f) scale = 0.45f;
-    if (!g_inited) init(scale);
+    if (scale > 2.5f) scale = 2.5f;
+    if (!g_inited) init(scale, pd);
     ImGui::SetCurrentContext(g_ctx);
     if (!ImGui::GetIO().BackendRendererUserData) gl_imgui_overlay_init();
-    ensure_fonts(scale, true);
+    ensure_fonts(scale, pd, true);
     ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize = ImVec2((float)tw, (float)th);
-    io.DisplayFramebufferScale = ImVec2(1, 1);
-    io.FontGlobalScale = 1.0f;
+    io.DisplaySize = ImVec2((float)ww, (float)wh);
+    io.DisplayFramebufferScale = ImVec2(fb_sx, fb_sy);
+    io.FontGlobalScale = 1.0f / pd;
     static double last;
     double now = SDL_GetTicks() / 1000.0;
     io.DeltaTime = last > 0 && now > last ? (float)(now - last) : 1.0f / 60;
@@ -1093,7 +1178,6 @@ void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_
     }
 
     drain_events(io);
-    io.FontGlobalScale = 1.0f;
 
     static ImGuiStyle base;
     static float style_scale = -1;
@@ -1166,7 +1250,64 @@ void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_
             const char *close_lbl = ui_tr(STR_BTN_CLOSE_MENU);
             float cbw = fmaxf(136 * scale, ImGui::CalcTextSize(close_lbl).x + 32 * scale);
             ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx - cbw - 14 * scale);
-            if (ImGui::Button(close_lbl, ImVec2(cbw, bx))) set_open(false);
+            bool close_clicked = ImGui::Button(close_lbl, ImVec2(cbw, bx));
+            if (s_btest_enabled == 1 && open) {
+                ImVec2 bmin = ImGui::GetItemRectMin(), bmax = ImGui::GetItemRectMax();
+                float cx = (bmin.x + bmax.x) * 0.5f, cy = (bmin.y + bmax.y) * 0.5f;
+                bool bhov = ImGui::IsItemHovered();
+                uint64_t f = gl_backend_present_count();
+                if (s_btest_step == 1 || (s_btest_step == 4 && ww == 1600 && wh == 900 && f > s_btest_step_frame + 1)) {
+                    s_btest_tx = cx;
+                    s_btest_ty = cy;
+                    s_btest_rect_ready = true;
+                    s_btest_down_sent = false;
+                    s_btest_up_sent = false;
+                    btest_push_sdl_motion(cx, cy);
+                    s_btest_step = (s_btest_step == 1) ? 2 : 6;
+                    s_btest_step_frame = f;
+                    if (ww == 1600 && wh == 900) {
+                        s_btest_touch_ok = input_verify_window_to_touch(&s_btest_touch_x, &s_btest_touch_y);
+                    }
+                } else if ((s_btest_step == 2 || s_btest_step == 6) && s_btest_rect_ready) {
+                    float err = hypotf(io.MousePos.x - s_btest_tx, io.MousePos.y - s_btest_ty);
+                    bool is_def = (s_btest_step == 2);
+                    bool &hov_flag = is_def ? s_btest_def_hov : s_btest_res_hov;
+                    bool &clk_flag = is_def ? s_btest_def_clk : s_btest_res_clk;
+                    if (!hov_flag && err < 1.0f && bhov) {
+                        hov_flag = true;
+                        LOG("[ui-test] hit_test stage=B mode=%s res_scale=%.1fx win=%dx%d pix=%dx%d disp_scale=%.3f DisplaySize=(%.0f,%.0f) fb_scale=(%.3f,%.3f) viewport=%dx%d target=(%.1f,%.1f) mouse=(%.1f,%.1f) err=%.3f hovered=1\n",
+                            is_def ? "default" : "resized", (double)gl_hle_active_res_scale_pct() / 100.0,
+                            ww, wh, pw, ph, (double)gl_backend_display_scale(),
+                            io.DisplaySize.x, io.DisplaySize.y, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y,
+                            pw, ph, s_btest_tx, s_btest_ty, io.MousePos.x, io.MousePos.y, err);
+                        btest_push_sdl_btn(true, s_btest_tx, s_btest_ty);
+                        s_btest_down_sent = true;
+                    } else if (hov_flag && s_btest_down_sent && !s_btest_up_sent && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                        btest_push_sdl_btn(false, s_btest_tx, s_btest_ty);
+                        s_btest_up_sent = true;
+                    }
+                    if (close_clicked) {
+                        clk_flag = true;
+                        LOG("[ui-test] hit_test stage=B mode=%s clicked=1 glErrors=%llu\n",
+                            is_def ? "default" : "resized", (unsigned long long)gl_imgui_gl_error_count());
+                        if (is_def) {
+                            s_btest_step = 3;
+                            s_btest_step_frame = f;
+                        } else {
+                            s_btest_step = 7;
+                            LOG("[ui-test] DONE stage=B hit_default=%s hit_resized=%s touch_center=(%d,%d) touch_ok=%d res_scale=%.1fx glErrors=%llu status=%s\n",
+                                (s_btest_def_hov && s_btest_def_clk) ? "PASS" : "FAIL",
+                                (s_btest_res_hov && s_btest_res_clk) ? "PASS" : "FAIL",
+                                s_btest_touch_x, s_btest_touch_y, s_btest_touch_ok ? 1 : 0,
+                                (double)gl_hle_active_res_scale_pct() / 100.0,
+                                (unsigned long long)gl_imgui_gl_error_count(),
+                                (s_btest_def_hov && s_btest_def_clk && s_btest_res_hov && s_btest_res_clk &&
+                                 s_btest_touch_ok && gl_imgui_gl_error_count() == 0) ? "PASS" : "FAIL");
+                        }
+                    }
+                }
+            }
+            if (close_clicked) set_open(false);
             ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx);
             ImVec2 p = ImGui::GetCursorScreenPos();
             ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
@@ -1206,5 +1347,5 @@ void menu_render_opengl(int win_w, int win_h, int pix_w, int pix_h, float pixel_
     if (!loading && !open) vpad_draw(scale);
     ImGui::Render();
     g_text_busy = open && ui_text_busy();
-    gl_imgui_overlay_render_draw_data(ImGui::GetDrawData(), (int)tw, (int)th, gl_backend_present_count());
+    gl_imgui_overlay_render_draw_data(ImGui::GetDrawData(), pw, ph, gl_backend_present_count());
 }
