@@ -31,7 +31,7 @@ A native Windows PC static recompilation runtime for *Yo-kai Watch 1* (Nintendo 
 
 - **OpenGL 4.5 Rendering & Internal Resolution Scaling**: Hardware OpenGL 4.5 rendering backed by a virtual `1920x1080` framebuffer with selectable internal supersampling (`1x` 1080p / `1.5x` 1620p / `2x` 4K 2160p via `res_scale`), automatic discrete GPU preference (`NvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance`), Windowed / Borderless / Exclusive Fullscreen modes, `16:9` aspect lock or stretch, and configurable V-Sync (`mailbox` / `fifo` / `immediate`).
 - **Native 60 FPS & Variable Game Speed (`1.0x` – `3.0x`)**: Runs Switch JP `v1.3.0` natively at **60 FPS** (default; hot-toggleable with original `30 FPS` via `fps_mode` in Launcher or `F1` Display settings) using dynamic `dt` pacing and a smoothed follow-camera interpolator fix (unverified revisions stay safely at `30 FPS`). Stacks cleanly with `1.0x`, `1.5x`, `2.0x`, and `3.0x` real-time speed (`F3` / `game_speed`) and audio pitch/rate sync while keeping pre-rendered cutscenes at `1.0x`.
-- **LayeredFS Mods Overlay (`mods/`)**: Drop extracted RomFS/ExeFS mod packs into `mods/<mod_name>/romfs/` (for example, community translation mods) and toggle them with `mods_enabled = 1` without touching your base dump.
+- **LayeredFS Mods Overlay (`mods/`, Verified English Translation Support)**: Drop third-party Switch `romfs/` mods (such as the community [*YO-KAI WATCH 1 for Switch English Translation*](https://gamebanana.com/mods/516048)) into `mods/<mod_name>/romfs/`, toggle them with `mods_enabled = 1`, and swap mods anytime without recompiling or modifying your base game dump.
 - **Multilingual High-DPI UI (`F1` Overlay & Launcher)**: Built-in launcher UI and in-game overlay (`F1` or `Minus + Plus`) render cleanly in **English, 简体中文, 繁體中文, 日本語, and 한국어** using Windows DirectWrite/ClearType system CJK fonts alongside bundled SIL OFL fonts.
 - **Controller, Keyboard & Mouse-to-Touch Support**: Switch Pro / Nintendo physical (`nintendo`) and Xbox letter (`xbox`) presets (note: `Xbox` maps host controller button positions only and does not replace in-game Switch button icons), full key/pad rebinding, rumble (`rumble_strength`), and direct mouse-to-touch input for menus and touch gameplay. Settings persist in `yokaiwatch1.ini`.
 - **Fast 2-Module Self-Build & Save Management**: On first launch, `yw1gen.exe` and the bundled slimmed Zig 0.17.0 compiler recompile `main` and `sdk` concurrently into `yw1game_<build16>.dll`, caching intermediate artifacts in `.gamebuild/` and storing saves in `save/` with automatic backups in `save_backups/`.
@@ -87,6 +87,42 @@ Once the 2-module native build completes, subsequent launches start immediately 
 | `F2` | Cycle performance HUD (`off` / `fps` / `detailed`) | `hotkey_hud` |
 | `F3` | Cycle game speed (`1.0x` / `1.5x` / `2.0x` / `3.0x`) | `hotkey_speed` |
 | `F11` | Toggle fullscreen | `hotkey_fullscreen` |
+
+---
+
+## Mods & LayeredFS Overlay
+
+### English Translation Mod Setup Guide
+
+> [!NOTE]
+> **Third-Party Community Project**: The English translation mod linked below is an independent community creation and is **NOT** bundled with or distributed by `YokaiWatch1Recomp` (this repository ships zero game assets or third-party mods).
+
+- **Third-Party Download**: [*YO-KAI WATCH 1 for Switch English Translation* on GameBanana](https://gamebanana.com/mods/516048) (`https://gamebanana.com/mods/516048`) — verified on JP `v1.3.0` with **Release 1.2.0**.
+
+#### 3-Step Installation
+
+1. Download and extract the English translation archive from the GameBanana link above.
+2. In the launcher (or Settings -> System / RecompLauncher `mods` folder shortcut), click **Open Mods Folder** to open `<data_root>/mods/`.
+3. Copy the extracted `0100C0000CEEA000` folder directly into `mods/` (or create `mods/en_patch/` and place `romfs/` inside it). Confirm **Enable mods/ Overlay** is enabled and displays `Mods: 1 active`, then launch the game (**adding, updating, or removing mods requires zero recompilation**).
+
+#### Valid vs. Invalid Directory Layouts
+
+```text
+# CORRECT:
+<data_root>/mods/
+├── en_patch/
+│   └── romfs/...              (recommended custom mod folder name)
+└── 0100C0000CEEA000/
+    └── romfs/...              (also valid when using the extracted Title ID folder directly)
+
+# WRONG (will NOT load):
+<data_root>/mods/romfs/...                         (missing <mod_name> folder level)
+<data_root>/mods/en_patch/0100C0000CEEA000/romfs/  (one extra nested folder inside en_patch)
+```
+
+#### Chinese, Other Languages & Visual/Gameplay Mods
+
+The same `mods/` LayeredFS overlay works out of the box for other community language translations (such as Chinese, Spanish, etc.) as well as texture, model, or gameplay mods. When multiple mod folders exist in `mods/`, files are overlaid alphabetically by folder name.
 
 ---
 
