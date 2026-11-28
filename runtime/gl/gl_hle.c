@@ -15,6 +15,7 @@
 #include "../simd.h"
 #include "gl_backend.h"
 #include "gl_imgui.h"
+#include "gl_trace.h"
 
 extern void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out, uint64_t *am_cmds_out,
                               char *svcs_buf, size_t svcs_cap);
@@ -72,6 +73,24 @@ extern void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out,
 #ifndef GL_DEPTH24_STENCIL8
 #define GL_DEPTH24_STENCIL8 0x88F0
 #endif
+#ifndef GL_DEPTH_ATTACHMENT
+#define GL_DEPTH_ATTACHMENT 0x8D00
+#endif
+#ifndef GL_STENCIL_ATTACHMENT
+#define GL_STENCIL_ATTACHMENT 0x8D20
+#endif
+#ifndef GL_COLOR
+#define GL_COLOR 0x1800
+#endif
+#ifndef GL_DEPTH
+#define GL_DEPTH 0x1801
+#endif
+#ifndef GL_STENCIL
+#define GL_STENCIL 0x1802
+#endif
+#ifndef GL_DEPTH_STENCIL
+#define GL_DEPTH_STENCIL 0x84F9
+#endif
 #ifndef GL_FRAMEBUFFER_COMPLETE
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
 #endif
@@ -83,6 +102,30 @@ extern void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out,
 #endif
 #ifndef GL_SCISSOR_TEST
 #define GL_SCISSOR_TEST 0x0C11
+#endif
+#ifndef GL_STENCIL_TEST
+#define GL_STENCIL_TEST 0x0B90
+#endif
+#ifndef GL_ALWAYS
+#define GL_ALWAYS 0x0207
+#endif
+#ifndef GL_INCR
+#define GL_INCR 0x1E02
+#endif
+#ifndef GL_KEEP
+#define GL_KEEP 0x1E00
+#endif
+#ifndef GL_FRONT
+#define GL_FRONT 0x0404
+#endif
+#ifndef GL_BACK
+#define GL_BACK 0x0405
+#endif
+#ifndef GL_FRONT_AND_BACK
+#define GL_FRONT_AND_BACK 0x0408
+#endif
+#ifndef GL_STENCIL_BUFFER_BIT
+#define GL_STENCIL_BUFFER_BIT 0x00000400
 #endif
 #ifndef GL_COLOR_CLEAR_VALUE
 #define GL_COLOR_CLEAR_VALUE 0x0C22
@@ -114,6 +157,9 @@ extern void ipc_get_telemetry(uint64_t *svc_misses_out, uint64_t *stub_cmds_out,
 #ifndef GL_FLOAT
 #define GL_FLOAT 0x1406
 #endif
+#ifndef GL_ACTIVE_UNIFORMS
+#define GL_ACTIVE_UNIFORMS 0x8B86
+#endif
 
 // ---- Explicit APIENTRY typedefs for all closed GL functions + helpers
 typedef void(APIENTRY *PFN_glActiveTexture)(GLenum);
@@ -122,14 +168,20 @@ typedef void(APIENTRY *PFN_glBindBuffer)(GLenum, GLuint);
 typedef void(APIENTRY *PFN_glBindFramebuffer)(GLenum, GLuint);
 typedef void(APIENTRY *PFN_glBindRenderbuffer)(GLenum, GLuint);
 typedef void(APIENTRY *PFN_glBindTexture)(GLenum, GLuint);
+typedef void(APIENTRY *PFN_glBlendColor)(GLfloat, GLfloat, GLfloat, GLfloat);
+typedef void(APIENTRY *PFN_glBlendEquation)(GLenum);
 typedef void(APIENTRY *PFN_glBlendEquationSeparate)(GLenum, GLenum);
+typedef void(APIENTRY *PFN_glBlendFunc)(GLenum, GLenum);
 typedef void(APIENTRY *PFN_glBlendFuncSeparate)(GLenum, GLenum, GLenum, GLenum);
 typedef void(APIENTRY *PFN_glBufferData)(GLenum, ptrdiff_t, const void *, GLenum);
+typedef void(APIENTRY *PFN_glClearBufferfi)(GLenum, GLint, GLfloat, GLint);
 typedef void(APIENTRY *PFN_glClearBufferfv)(GLenum, GLint, const GLfloat *);
 typedef void(APIENTRY *PFN_glClearBufferiv)(GLenum, GLint, const GLint *);
+typedef void(APIENTRY *PFN_glClearBufferuiv)(GLenum, GLint, const GLuint *);
 typedef void(APIENTRY *PFN_glColorMask)(GLboolean, GLboolean, GLboolean, GLboolean);
 typedef void(APIENTRY *PFN_glCompileShader)(GLuint);
 typedef void(APIENTRY *PFN_glCompressedTexImage2D)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void *);
+typedef void(APIENTRY *PFN_glCopyTexImage2D)(GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei, GLint);
 typedef void(APIENTRY *PFN_glCopyTexSubImage2D)(GLenum, GLint, GLint, GLint, GLint, GLint, GLsizei, GLsizei);
 typedef GLuint(APIENTRY *PFN_glCreateProgram)(void);
 typedef GLuint(APIENTRY *PFN_glCreateShader)(GLenum);
@@ -142,6 +194,8 @@ typedef void(APIENTRY *PFN_glDeleteShader)(GLuint);
 typedef void(APIENTRY *PFN_glDeleteTextures)(GLsizei, const GLuint *);
 typedef void(APIENTRY *PFN_glDepthFunc)(GLenum);
 typedef void(APIENTRY *PFN_glDepthMask)(GLboolean);
+typedef void(APIENTRY *PFN_glDepthRange)(GLdouble, GLdouble);
+typedef void(APIENTRY *PFN_glDepthRangef)(GLfloat, GLfloat);
 typedef void(APIENTRY *PFN_glDisable)(GLenum);
 typedef void(APIENTRY *PFN_glDisableVertexAttribArray)(GLuint);
 typedef void(APIENTRY *PFN_glDrawArrays)(GLenum, GLint, GLsizei);
@@ -152,6 +206,7 @@ typedef void(APIENTRY *PFN_glEnableVertexAttribArray)(GLuint);
 typedef void(APIENTRY *PFN_glFinish)(void);
 typedef void(APIENTRY *PFN_glFramebufferRenderbuffer)(GLenum, GLenum, GLenum, GLuint);
 typedef void(APIENTRY *PFN_glFramebufferTexture2D)(GLenum, GLenum, GLenum, GLuint, GLint);
+typedef void(APIENTRY *PFN_glFrontFace)(GLenum);
 typedef void(APIENTRY *PFN_glGenBuffers)(GLsizei, GLuint *);
 typedef void(APIENTRY *PFN_glGenFramebuffers)(GLsizei, GLuint *);
 typedef void(APIENTRY *PFN_glGenRenderbuffers)(GLsizei, GLuint *);
@@ -174,12 +229,16 @@ typedef void(APIENTRY *PFN_glRenderbufferStorage)(GLenum, GLenum, GLsizei, GLsiz
 typedef void(APIENTRY *PFN_glScissor)(GLint, GLint, GLsizei, GLsizei);
 typedef void(APIENTRY *PFN_glShaderSource)(GLuint, GLsizei, const GLchar *const *, const GLint *);
 typedef void(APIENTRY *PFN_glStencilFunc)(GLenum, GLint, GLuint);
+typedef void(APIENTRY *PFN_glStencilFuncSeparate)(GLenum, GLenum, GLint, GLuint);
 typedef void(APIENTRY *PFN_glStencilMask)(GLuint);
+typedef void(APIENTRY *PFN_glStencilMaskSeparate)(GLenum, GLuint);
 typedef void(APIENTRY *PFN_glStencilOp)(GLenum, GLenum, GLenum);
+typedef void(APIENTRY *PFN_glStencilOpSeparate)(GLenum, GLenum, GLenum, GLenum);
 typedef void(APIENTRY *PFN_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *);
 typedef void(APIENTRY *PFN_glTexParameterf)(GLenum, GLenum, GLfloat);
 typedef void(APIENTRY *PFN_glTexParameterfv)(GLenum, GLenum, const GLfloat *);
 typedef void(APIENTRY *PFN_glTexParameteri)(GLenum, GLenum, GLint);
+typedef void(APIENTRY *PFN_glTexSubImage2D)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *);
 typedef void(APIENTRY *PFN_glUniform1f)(GLint, GLfloat);
 typedef void(APIENTRY *PFN_glUniform1fv)(GLint, GLsizei, const GLfloat *);
 typedef void(APIENTRY *PFN_glUniform1i)(GLint, GLint);
@@ -212,6 +271,7 @@ typedef GLenum(APIENTRY *PFN_glGetError)(void);
 typedef void(APIENTRY *PFN_glFlush)(void);
 typedef void(APIENTRY *PFN_glClear)(GLbitfield);
 typedef void(APIENTRY *PFN_glClearColor)(GLfloat, GLfloat, GLfloat, GLfloat);
+typedef void(APIENTRY *PFN_glClearDepth)(GLdouble);
 typedef void(APIENTRY *PFN_glClearDepthf)(GLfloat);
 typedef void(APIENTRY *PFN_glClearStencil)(GLint);
 typedef const GLubyte *(APIENTRY *PFN_glGetStringi)(GLenum, GLuint);
@@ -224,6 +284,8 @@ typedef void(APIENTRY *PFN_glReadBuffer)(GLenum);
 typedef GLenum(APIENTRY *PFN_glCheckFramebufferStatus)(GLenum);
 typedef void(APIENTRY *PFN_glBlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
 typedef GLboolean(APIENTRY *PFN_glIsEnabled)(GLenum);
+typedef void(APIENTRY *PFN_glGetUniformiv)(GLuint, GLint, GLint *);
+typedef void(APIENTRY *PFN_glGetUniformfv)(GLuint, GLint, GLfloat *);
 
 #define GL_ALL_PROCS(X) \
     X(glActiveTexture) \
@@ -232,14 +294,20 @@ typedef GLboolean(APIENTRY *PFN_glIsEnabled)(GLenum);
     X(glBindFramebuffer) \
     X(glBindRenderbuffer) \
     X(glBindTexture) \
+    X(glBlendColor) \
+    X(glBlendEquation) \
     X(glBlendEquationSeparate) \
+    X(glBlendFunc) \
     X(glBlendFuncSeparate) \
     X(glBufferData) \
+    X(glClearBufferfi) \
     X(glClearBufferfv) \
     X(glClearBufferiv) \
+    X(glClearBufferuiv) \
     X(glColorMask) \
     X(glCompileShader) \
     X(glCompressedTexImage2D) \
+    X(glCopyTexImage2D) \
     X(glCopyTexSubImage2D) \
     X(glCreateProgram) \
     X(glCreateShader) \
@@ -252,6 +320,8 @@ typedef GLboolean(APIENTRY *PFN_glIsEnabled)(GLenum);
     X(glDeleteTextures) \
     X(glDepthFunc) \
     X(glDepthMask) \
+    X(glDepthRange) \
+    X(glDepthRangef) \
     X(glDisable) \
     X(glDisableVertexAttribArray) \
     X(glDrawArrays) \
@@ -262,6 +332,7 @@ typedef GLboolean(APIENTRY *PFN_glIsEnabled)(GLenum);
     X(glFinish) \
     X(glFramebufferRenderbuffer) \
     X(glFramebufferTexture2D) \
+    X(glFrontFace) \
     X(glGenBuffers) \
     X(glGenFramebuffers) \
     X(glGenRenderbuffers) \
@@ -284,12 +355,16 @@ typedef GLboolean(APIENTRY *PFN_glIsEnabled)(GLenum);
     X(glScissor) \
     X(glShaderSource) \
     X(glStencilFunc) \
+    X(glStencilFuncSeparate) \
     X(glStencilMask) \
+    X(glStencilMaskSeparate) \
     X(glStencilOp) \
+    X(glStencilOpSeparate) \
     X(glTexImage2D) \
     X(glTexParameterf) \
     X(glTexParameterfv) \
     X(glTexParameteri) \
+    X(glTexSubImage2D) \
     X(glUniform1f) \
     X(glUniform1fv) \
     X(glUniform1i) \
@@ -320,6 +395,7 @@ typedef GLboolean(APIENTRY *PFN_glIsEnabled)(GLenum);
     X(glFlush) \
     X(glClear) \
     X(glClearColor) \
+    X(glClearDepth) \
     X(glClearDepthf) \
     X(glClearStencil) \
     X(glGetStringi) \
@@ -331,7 +407,9 @@ typedef GLboolean(APIENTRY *PFN_glIsEnabled)(GLenum);
     X(glReadBuffer) \
     X(glCheckFramebufferStatus) \
     X(glBlitFramebuffer) \
-    X(glIsEnabled)
+    X(glIsEnabled) \
+    X(glGetUniformiv) \
+    X(glGetUniformfv)
 
 static struct {
 #define X(name) PFN_##name p_##name;
@@ -383,9 +461,25 @@ static GLuint g_cur_tex2d, g_cur_rbo;
 typedef struct {
     GLuint fbo;
     bool scaled;
+    bool depth_d24s8;
+    bool stencil_d24s8;
+    bool depth_stencil_d24s8;
     bool used;
 } FboScaleSlot;
 static FboScaleSlot g_fbo_scales[OBJ_DIM_CAP];
+
+// Generic GL state tracking for D24S8 missed-stencil-clear detection & offscreen stencil-write alpha-test suppression
+static GLuint g_stencil_wmask_front = 0xFFFFFFFFu;
+static GLuint g_stencil_wmask_back = 0xFFFFFFFFu;
+static bool g_pending_d24s8_stencil_clear = false;
+static GLsizei g_cur_vp_w = 0, g_cur_vp_h = 0;
+static bool g_cur_stencil_test = false;
+static GLenum g_cur_stencil_func = GL_ALWAYS;
+static GLenum g_cur_stencil_dppass = GL_KEEP;
+static GLuint g_cur_prog = 0;
+static GLuint g_atest_cached_prog = 0;
+static GLint g_atest_en_loc = -1, g_atest_ref_loc = -1;
+static bool g_atest_cache_valid = false;
 
 typedef struct {
     GLsizei w, h;
@@ -512,9 +606,89 @@ static void fbo_scale_clear_locked(GLuint fbo) {
         if (!s->used) return;
         if (s->fbo == fbo) {
             s->scaled = false;
+            s->depth_d24s8 = false;
+            s->stencil_d24s8 = false;
+            s->depth_stencil_d24s8 = false;
             return;
         }
     }
+}
+
+static void fbo_d24s8_set_locked(GLuint fbo, GLenum attachment, bool is_d24s8) {
+    if (!fbo) return;
+    if (attachment != GL_DEPTH_ATTACHMENT && attachment != GL_STENCIL_ATTACHMENT &&
+        attachment != GL_DEPTH_STENCIL_ATTACHMENT) {
+        return;
+    }
+    uint32_t idx = (uint32_t)(fbo * 2654435761u) & (OBJ_DIM_CAP - 1);
+    for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
+        FboScaleSlot *s = &g_fbo_scales[(idx + i) & (OBJ_DIM_CAP - 1)];
+        if (!s->used || s->fbo == fbo) {
+            if (!s->used) {
+                memset(s, 0, sizeof *s);
+                s->fbo = fbo;
+                s->used = true;
+            }
+            if (attachment == GL_DEPTH_ATTACHMENT) s->depth_d24s8 = is_d24s8;
+            else if (attachment == GL_STENCIL_ATTACHMENT) s->stencil_d24s8 = is_d24s8;
+            else {
+                s->depth_stencil_d24s8 = is_d24s8;
+                if (!is_d24s8) {
+                    s->depth_d24s8 = false;
+                    s->stencil_d24s8 = false;
+                }
+            }
+            return;
+        }
+    }
+}
+
+static bool fbo_has_d24s8_locked(GLuint fbo) {
+    if (!fbo) return false;
+    uint32_t idx = (uint32_t)(fbo * 2654435761u) & (OBJ_DIM_CAP - 1);
+    for (uint32_t i = 0; i < OBJ_DIM_CAP; i++) {
+        const FboScaleSlot *s = &g_fbo_scales[(idx + i) & (OBJ_DIM_CAP - 1)];
+        if (!s->used) return false;
+        if (s->fbo == fbo) return s->depth_d24s8 || s->stencil_d24s8 || s->depth_stencil_d24s8;
+    }
+    return false;
+}
+
+static void invalidate_atest_cache(GLuint prog) {
+    if (prog == 0 || prog == g_atest_cached_prog) {
+        g_atest_cache_valid = false;
+        g_atest_cached_prog = 0;
+        g_atest_en_loc = -1;
+        g_atest_ref_loc = -1;
+    }
+}
+
+// Generic offscreen stencil-write suppression: avoids alpha-test discarding transparent glare pixels during lens mask writes.
+static bool lens_mask_atest_suppress_begin(GLint *en_loc_out) {
+    if (g_guest_draw_fbo == 0 || g_cur_vp_w != 360 || g_cur_vp_h != 202 || !g_cur_stencil_test ||
+        g_cur_stencil_func != GL_ALWAYS || g_cur_stencil_dppass != GL_INCR ||
+        (g_stencil_wmask_front & 1u) == 0u || g_cur_prog == 0 ||
+        !g_gl.p_glGetUniformLocation || !g_gl.p_glGetUniformiv || !g_gl.p_glGetUniformfv ||
+        !g_gl.p_glUniform1i) {
+        return false;
+    }
+    if (!g_atest_cache_valid || g_atest_cached_prog != g_cur_prog) {
+        g_atest_cached_prog = g_cur_prog;
+        g_atest_en_loc = g_gl.p_glGetUniformLocation(g_cur_prog, "dmp_FragOperation.enableAlphaTest");
+        g_atest_ref_loc = g_gl.p_glGetUniformLocation(g_cur_prog, "dmp_FragOperation.alphaRefValue");
+        g_atest_cache_valid = true;
+    }
+    if (g_atest_en_loc < 0 || g_atest_ref_loc < 0) return false;
+    GLint en_val = 0;
+    GLfloat ref_val = -1.0f;
+    g_gl.p_glGetUniformiv(g_cur_prog, g_atest_en_loc, &en_val);
+    g_gl.p_glGetUniformfv(g_cur_prog, g_atest_ref_loc, &ref_val);
+    if (en_val == 1 && ref_val == 0.0f) {
+        g_gl.p_glUniform1i(g_atest_en_loc, 0);
+        *en_loc_out = g_atest_en_loc;
+        return true;
+    }
+    return false;
 }
 
 static bool fbo_is_scaled_locked(GLuint fbo) {
@@ -529,14 +703,21 @@ static bool fbo_is_scaled_locked(GLuint fbo) {
 }
 
 static void record_offscreen_fbo(GLenum target, GLenum attachment, bool is_rbo, GLuint obj_id) {
-    if (!obj_id) return;
     GLuint fbo = (target == GL_READ_FRAMEBUFFER) ? g_guest_read_fbo : g_guest_draw_fbo;
     if (fbo == 0) return;
+    if (!obj_id) {
+        pthread_mutex_lock(&g_gl_lock);
+        fbo_d24s8_set_locked(fbo, attachment, false);
+        pthread_mutex_unlock(&g_gl_lock);
+        return;
+    }
     pthread_mutex_lock(&g_gl_lock);
     GLenum fmt = 0;
     GLsizei w = 0, h = 0;
     bool obj_scaled = false;
     if (obj_dim_get_locked(is_rbo ? g_rbo_dims : g_tex_dims, obj_id, &fmt, &w, &h, &obj_scaled) && w > 0 && h > 0) {
+        bool is_d24s8 = (fmt == GL_DEPTH24_STENCIL8 || fmt == GL_DEPTH_STENCIL);
+        fbo_d24s8_set_locked(fbo, attachment, is_d24s8);
         fbo_scale_set_locked(fbo, obj_scaled);
         bool is_new_slot = true;
         for (int i = 0; i < g_nfbo_seen; i++) {
@@ -642,6 +823,15 @@ RT_ON_RESET(gl_hle_reset) {
     g_vfbo_h = VFBO_BASE_H;
     g_virtual_fbo = g_vfbo_color = g_vfbo_depth = 0;
     g_guest_draw_fbo = g_guest_read_fbo = 0;
+    g_stencil_wmask_front = 0xFFFFFFFFu;
+    g_stencil_wmask_back = 0xFFFFFFFFu;
+    g_pending_d24s8_stencil_clear = false;
+    g_cur_vp_w = g_cur_vp_h = 0;
+    g_cur_stencil_test = false;
+    g_cur_stencil_func = GL_ALWAYS;
+    g_cur_stencil_dppass = GL_KEEP;
+    g_cur_prog = 0;
+    invalidate_atest_cache(0);
     g_sh_audit_total = g_sh_audit_fragcoord = g_sh_audit_texsize = g_sh_audit_texelfetch = g_sh_audit_dfdx = g_sh_audit_gauss_uni = 0;
     memset(g_gl_err_stats, 0, sizeof g_gl_err_stats);
     g_gl_err_kind_n = 0;
@@ -649,6 +839,7 @@ RT_ON_RESET(gl_hle_reset) {
     __atomic_store_n(&g_total_draws, 0, __ATOMIC_RELAXED);
     g_epa_hits = g_epa_misses = 0;
     pthread_mutex_unlock(&g_gl_lock);
+    gl_trace_reset();
 }
 
 void gl_hle_init_procs(void) {
@@ -786,6 +977,7 @@ void gl_hle_blit_virtual_fbo(int win_w, int win_h) {
     g_gl.p_glBlitFramebuffer(0, 0, g_vfbo_w, g_vfbo_h,
                              dst_x, dst_y, dst_x + dst_w, dst_y + dst_h,
                              GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    gl_trace_log_blit_vfbo(g_virtual_fbo, g_vfbo_w, g_vfbo_h, dst_x, dst_y, dst_w, dst_h);
 
     if (g_gl.p_glClearColor) g_gl.p_glClearColor(prev_clear[0], prev_clear[1], prev_clear[2], prev_clear[3]);
     if (g_gl.p_glColorMask) g_gl.p_glColorMask(prev_cmask[0], prev_cmask[1], prev_cmask[2], prev_cmask[3]);
@@ -952,19 +1144,50 @@ void gl_hle_log_summary(void) {
 #define CPTR(i) ((const void *)(uintptr_t)c->x[i])
 #define SZP(i) ((ptrdiff_t)(int64_t)c->x[i])
 #define STK_PTR(slot) ((const void *)(uintptr_t)*(const uint64_t *)(uintptr_t)(c->sp + (uint64_t)(slot) * 8ull))
+#define STK_U32(slot) ((uint32_t)*(const uint64_t *)(uintptr_t)(c->sp + (uint64_t)(slot) * 8ull))
 #define F32(v) (VSF32(v))
+#define F64(v) (VSF64(v))
+
+static inline GLenum trace_poll_err(void) {
+    if (!gl_trace_is_active() || !g_gl.p_glGetError) return 0;
+    return g_gl.p_glGetError();
+}
+
+void gl_hle_trace_swap_end(uint64_t frame_num) {
+    gl_trace_on_frame_swap_end(frame_num, g_res_scale_pct, g_vfbo_w, g_vfbo_h,
+                               g_guest_draw_fbo, g_guest_read_fbo, g_virtual_fbo,
+                               g_vfbo_color, g_vfbo_depth);
+}
 
 // ---- Individual HLE wrappers for all 90 closed gl* functions + helpers
-static void hle_glActiveTexture(Cpu *c) { g_gl.p_glActiveTexture(U32(0)); }
-static void hle_glAttachShader(Cpu *c) { g_gl.p_glAttachShader(U32(0), U32(1)); }
+static void hle_glActiveTexture(Cpu *c) {
+    GLenum u = U32(0);
+    g_gl.p_glActiveTexture(u);
+    gl_trace_log_active_texture(u);
+}
+static void hle_glAttachShader(Cpu *c) {
+    GLuint p = U32(0), s = U32(1);
+    g_gl.p_glAttachShader(p, s);
+    gl_trace_on_attach_shader(p, s);
+}
 static void hle_glBindBuffer(Cpu *c) { g_gl.p_glBindBuffer(U32(0), U32(1)); }
 static void hle_glBindFramebuffer(Cpu *c) {
     GLenum target = U32(0);
     GLuint fb = U32(1);
-    if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) g_guest_draw_fbo = fb;
+    if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) {
+        g_guest_draw_fbo = fb;
+        g_pending_d24s8_stencil_clear = false;
+    }
     if (target == GL_FRAMEBUFFER || target == GL_READ_FRAMEBUFFER) g_guest_read_fbo = fb;
     GLuint real_fb = (fb == 0 && g_virtual_fbo != 0) ? g_virtual_fbo : fb;
     g_gl.p_glBindFramebuffer(target, real_fb);
+    if (gl_trace_is_active()) {
+        pthread_mutex_lock(&g_gl_lock);
+        bool sc = fbo_is_scaled_locked(fb);
+        pthread_mutex_unlock(&g_gl_lock);
+        gl_trace_log_bind_fbo(target, fb, real_fb, sc, g_virtual_fbo, g_vfbo_w, g_vfbo_h,
+                              g_res_scale_pct, g_vfbo_color, g_vfbo_depth, trace_poll_err());
+    }
 }
 static void hle_glBindRenderbuffer(Cpu *c) {
     GLenum target = U32(0);
@@ -985,13 +1208,72 @@ static void hle_glBindTexture(Cpu *c) {
         pthread_mutex_unlock(&g_gl_lock);
     }
     g_gl.p_glBindTexture(target, tex);
+    gl_trace_log_bind_texture(target, tex, trace_poll_err());
 }
-static void hle_glBlendEquationSeparate(Cpu *c) { g_gl.p_glBlendEquationSeparate(U32(0), U32(1)); }
-static void hle_glBlendFuncSeparate(Cpu *c) { g_gl.p_glBlendFuncSeparate(U32(0), U32(1), U32(2), U32(3)); }
+static void hle_glBlendColor(Cpu *c) { g_gl.p_glBlendColor(F32(0), F32(1), F32(2), F32(3)); }
+static void hle_glBlendEquation(Cpu *c) {
+    GLenum m = U32(0);
+    g_gl.p_glBlendEquation(m);
+    gl_trace_log_blend_eq(m, m);
+}
+static void hle_glBlendEquationSeparate(Cpu *c) {
+    GLenum rgb = U32(0), a = U32(1);
+    g_gl.p_glBlendEquationSeparate(rgb, a);
+    gl_trace_log_blend_eq(rgb, a);
+}
+static void hle_glBlendFunc(Cpu *c) {
+    GLenum sf = U32(0), df = U32(1);
+    g_gl.p_glBlendFunc(sf, df);
+    gl_trace_log_blend_func(sf, df, sf, df);
+}
+static void hle_glBlendFuncSeparate(Cpu *c) {
+    GLenum sr = U32(0), dr = U32(1), sa = U32(2), da = U32(3);
+    g_gl.p_glBlendFuncSeparate(sr, dr, sa, da);
+    gl_trace_log_blend_func(sr, dr, sa, da);
+}
 static void hle_glBufferData(Cpu *c) { g_gl.p_glBufferData(U32(0), SZP(1), CPTR(2), U32(3)); }
-static void hle_glClearBufferfv(Cpu *c) { g_gl.p_glClearBufferfv(U32(0), I32(1), (const GLfloat *)CPTR(2)); }
-static void hle_glClearBufferiv(Cpu *c) { g_gl.p_glClearBufferiv(U32(0), I32(1), (const GLint *)CPTR(2)); }
-static void hle_glColorMask(Cpu *c) { g_gl.p_glColorMask(U8(0), U8(1), U8(2), U8(3)); }
+static void hle_glCheckFramebufferStatus(Cpu *c) {
+    GLenum target = U32(0);
+    GLenum st = g_gl.p_glCheckFramebufferStatus ? g_gl.p_glCheckFramebufferStatus(target) : 0;
+    c->x[0] = (uint64_t)(uint32_t)st;
+}
+static void hle_glClearBufferfi(Cpu *c) {
+    GLenum b = U32(0); GLint db = I32(1); GLfloat d = F32(0); GLint s = I32(2);
+    if (b == GL_DEPTH_STENCIL) g_pending_d24s8_stencil_clear = false;
+    g_gl.p_glClearBufferfi(b, db, d, s);
+    gl_trace_log_clear_buffer_fi(b, db, d, s, trace_poll_err());
+}
+static void hle_glClearBufferfv(Cpu *c) {
+    GLenum b = U32(0); GLint db = I32(1);
+    const GLfloat *v = (const GLfloat *)CPTR(2);
+    if (b == GL_DEPTH && g_guest_draw_fbo != 0 &&
+        (g_stencil_wmask_front != 0u || g_stencil_wmask_back != 0u)) {
+        pthread_mutex_lock(&g_gl_lock);
+        bool has_d24s8 = fbo_has_d24s8_locked(g_guest_draw_fbo);
+        pthread_mutex_unlock(&g_gl_lock);
+        if (has_d24s8) g_pending_d24s8_stencil_clear = true;
+    }
+    g_gl.p_glClearBufferfv(b, db, v);
+    gl_trace_log_clear_buffer_f("glClearBufferfv", b, db, v, trace_poll_err());
+}
+static void hle_glClearBufferiv(Cpu *c) {
+    GLenum b = U32(0); GLint db = I32(1);
+    const GLint *v = (const GLint *)CPTR(2);
+    if (b == GL_STENCIL) g_pending_d24s8_stencil_clear = false;
+    g_gl.p_glClearBufferiv(b, db, v);
+    gl_trace_log_clear_buffer_i("glClearBufferiv", b, db, v, trace_poll_err());
+}
+static void hle_glClearBufferuiv(Cpu *c) {
+    GLenum b = U32(0); GLint db = I32(1);
+    const GLuint *v = (const GLuint *)CPTR(2);
+    g_gl.p_glClearBufferuiv(b, db, v);
+    gl_trace_log_clear_buffer_u("glClearBufferuiv", b, db, v, trace_poll_err());
+}
+static void hle_glColorMask(Cpu *c) {
+    GLboolean r = U8(0), g = U8(1), b = U8(2), a = U8(3);
+    g_gl.p_glColorMask(r, g, b, a);
+    gl_trace_log_color_mask(r, g, b, a);
+}
 
 static void store_shader_head(GLuint shader, const char *src, int len) {
     char clean[256];
@@ -1059,6 +1341,7 @@ static void audit_full_shader_source(GLuint shader, const GLchar *const *strings
         LOG("[gl] SHADER AUDIT #%u: fc=%d ts=%d tf=%d df=%d gauss=%d len=%zu\n%s\n",
             shader, has_fc, has_ts, has_tf, has_dx, has_gs, p, full);
     }
+    gl_trace_on_shader_source(shader, full, p, has_fc, has_ts, has_tf, has_dx, has_gs);
     free(full);
 }
 
@@ -1094,6 +1377,7 @@ static void hle_glCompileShader(Cpu *c) {
         if (ok) {
             int n = __atomic_add_fetch(&g_shader_ok, 1, __ATOMIC_RELAXED);
             if (n == 1 || n % 25 == 0) LOG("[gl] shaders compiled ok=%d fail=%d\n", n, g_shader_fail);
+            gl_trace_on_compile_shader(shader, ok, NULL);
         } else {
             int nf = __atomic_add_fetch(&g_shader_fail, 1, __ATOMIC_RELAXED);
             char info[2048] = "";
@@ -1107,6 +1391,7 @@ static void hle_glCompileShader(Cpu *c) {
                 }
             }
             pthread_mutex_unlock(&g_gl_lock);
+            gl_trace_on_compile_shader(shader, ok, info);
             LOG("[gl] SHADER COMPILE FAILED #%u (fail_count=%d):\n  log: %s\n  src[0..200]: %s\n",
                 shader, nf, info[0] ? info : "(empty)", head[0] ? head : "(unknown)");
         }
@@ -1202,11 +1487,48 @@ static void hle_glCompressedTexImage2D(Cpu *c) {
     g_gl.p_glCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, data);
 }
 
-static void hle_glCopyTexSubImage2D(Cpu *c) {
-    g_gl.p_glCopyTexSubImage2D(U32(0), I32(1), I32(2), I32(3), I32(4), I32(5), I32(6), I32(7));
+static void hle_glCopyTexImage2D(Cpu *c) {
+    GLenum target = U32(0);
+    GLint level = I32(1);
+    GLenum int_fmt = U32(2);
+    GLint x = I32(3), y = I32(4);
+    GLsizei w = I32(5), h = I32(6);
+    GLint border = I32(7);
+    g_gl.p_glCopyTexImage2D(target, level, int_fmt, x, y, w, h, border);
+    if (gl_trace_hotkey_enabled()) {
+        pthread_mutex_lock(&g_gl_lock);
+        GLuint dst_tex = g_cur_tex2d;
+        bool read_sc = fbo_is_scaled_locked(g_guest_read_fbo);
+        pthread_mutex_unlock(&g_gl_lock);
+        gl_trace_log_copy_tex_image_2d(dst_tex, g_guest_read_fbo, target, level, int_fmt, x, y, w, h,
+                                       read_sc, trace_poll_err());
+    }
 }
-static void hle_glCreateProgram(Cpu *c) { c->x[0] = (uint64_t)g_gl.p_glCreateProgram(); }
-static void hle_glCreateShader(Cpu *c) { c->x[0] = (uint64_t)g_gl.p_glCreateShader(U32(0)); }
+static void hle_glCopyTexSubImage2D(Cpu *c) {
+    GLenum target = U32(0);
+    GLint level = I32(1), xoff = I32(2), yoff = I32(3), x = I32(4), y = I32(5);
+    GLsizei w = I32(6), h = I32(7);
+    g_gl.p_glCopyTexSubImage2D(target, level, xoff, yoff, x, y, w, h);
+    if (gl_trace_hotkey_enabled()) {
+        pthread_mutex_lock(&g_gl_lock);
+        GLuint dst_tex = g_cur_tex2d;
+        bool read_sc = fbo_is_scaled_locked(g_guest_read_fbo);
+        pthread_mutex_unlock(&g_gl_lock);
+        gl_trace_on_copy_tex_sub_image_2d(dst_tex, g_guest_read_fbo, target, level,
+                                          xoff, yoff, x, y, w, h, read_sc, trace_poll_err());
+    }
+}
+static void hle_glCreateProgram(Cpu *c) {
+    GLuint pr = g_gl.p_glCreateProgram();
+    gl_trace_on_create_program(pr);
+    c->x[0] = (uint64_t)pr;
+}
+static void hle_glCreateShader(Cpu *c) {
+    GLenum t = U32(0);
+    GLuint sh = g_gl.p_glCreateShader(t);
+    gl_trace_on_create_shader(t, sh);
+    c->x[0] = (uint64_t)sh;
+}
 static void hle_glCullFace(Cpu *c) { g_gl.p_glCullFace(U32(0)); }
 static void hle_glDeleteBuffers(Cpu *c) { g_gl.p_glDeleteBuffers(I32(0), (const GLuint *)CPTR(1)); }
 static GLenum rewrite_default_fbo_buf(GLenum buf, bool is_draw) {
@@ -1224,12 +1546,16 @@ static void hle_glDeleteFramebuffers(Cpu *c) {
         pthread_mutex_lock(&g_gl_lock);
         for (GLsizei i = 0; i < n; i++) fbo_scale_clear_locked(fbs[i]);
         pthread_mutex_unlock(&g_gl_lock);
+        if (gl_trace_hotkey_enabled()) {
+            for (GLsizei i = 0; i < n; i++) gl_trace_on_delete_fbo(fbs[i]);
+        }
     }
     if (fbs && n > 0 && g_virtual_fbo != 0) {
         for (GLsizei i = 0; i < n; i++) {
             if (fbs[i] == 0) continue;
             if (fbs[i] == g_guest_draw_fbo) {
                 g_guest_draw_fbo = 0;
+                g_pending_d24s8_stencil_clear = false;
                 g_gl.p_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_virtual_fbo);
             }
             if (fbs[i] == g_guest_read_fbo) {
@@ -1239,17 +1565,43 @@ static void hle_glDeleteFramebuffers(Cpu *c) {
         }
     }
 }
-static void hle_glDeleteProgram(Cpu *c) { g_gl.p_glDeleteProgram(U32(0)); }
+static void hle_glDeleteProgram(Cpu *c) {
+    GLuint p = U32(0);
+    if (p == g_cur_prog) g_cur_prog = 0;
+    invalidate_atest_cache(p);
+    gl_trace_on_delete_program(p);
+    g_gl.p_glDeleteProgram(p);
+}
 static void hle_glDeleteRenderbuffers(Cpu *c) { g_gl.p_glDeleteRenderbuffers(I32(0), (const GLuint *)CPTR(1)); }
-static void hle_glDeleteShader(Cpu *c) { g_gl.p_glDeleteShader(U32(0)); }
+static void hle_glDeleteShader(Cpu *c) {
+    GLuint s = U32(0);
+    gl_trace_on_delete_shader(s);
+    g_gl.p_glDeleteShader(s);
+}
 static void hle_glDeleteTextures(Cpu *c) { g_gl.p_glDeleteTextures(I32(0), (const GLuint *)CPTR(1)); }
-static void hle_glDepthFunc(Cpu *c) { g_gl.p_glDepthFunc(U32(0)); }
-static void hle_glDepthMask(Cpu *c) { g_gl.p_glDepthMask(U8(0)); }
-static void hle_glDisable(Cpu *c) { g_gl.p_glDisable(U32(0)); }
+static void hle_glDepthFunc(Cpu *c) {
+    GLenum f = U32(0);
+    g_gl.p_glDepthFunc(f);
+    gl_trace_log_depth_func(f);
+}
+static void hle_glDepthMask(Cpu *c) {
+    GLboolean flag = U8(0);
+    g_gl.p_glDepthMask(flag);
+    gl_trace_log_depth_mask(flag);
+}
+static void hle_glDisable(Cpu *c) {
+    GLenum cap = U32(0);
+    if (cap == GL_STENCIL_TEST) g_cur_stencil_test = false;
+    g_gl.p_glDisable(cap);
+    gl_trace_log_enable_cap(cap, false, trace_poll_err());
+}
 static void hle_glDisableVertexAttribArray(Cpu *c) { g_gl.p_glDisableVertexAttribArray(U32(0)); }
 static void hle_glDrawArrays(Cpu *c) {
+    GLenum m = U32(0); GLint first = I32(1); GLsizei cnt = I32(2);
+    g_pending_d24s8_stencil_clear = false;
     __atomic_fetch_add(&g_total_draws, 1, __ATOMIC_RELAXED);
-    g_gl.p_glDrawArrays(U32(0), I32(1), I32(2));
+    g_gl.p_glDrawArrays(m, first, cnt);
+    gl_trace_log_draw_arrays(m, first, cnt, g_guest_draw_fbo, trace_poll_err());
 }
 static void hle_glDrawBuffer(Cpu *c) {
     if (g_gl.p_glDrawBuffer) g_gl.p_glDrawBuffer(rewrite_default_fbo_buf(U32(0), true));
@@ -1269,11 +1621,23 @@ static void hle_glDrawBuffers(Cpu *c) {
     }
     g_gl.p_glDrawBuffers(n, bufs);
 }
+
 static void hle_glDrawElements(Cpu *c) {
+    GLenum m = U32(0), t = U32(2); GLsizei cnt = I32(1); const void *idx = CPTR(3);
+    g_pending_d24s8_stencil_clear = false;
     __atomic_fetch_add(&g_total_draws, 1, __ATOMIC_RELAXED);
-    g_gl.p_glDrawElements(U32(0), I32(1), U32(2), CPTR(3));
+    GLint atest_loc = -1;
+    bool suppressed = lens_mask_atest_suppress_begin(&atest_loc);
+    g_gl.p_glDrawElements(m, cnt, t, idx);
+    if (suppressed) g_gl.p_glUniform1i(atest_loc, 1);
+    gl_trace_log_draw_elements(m, cnt, t, idx, g_guest_draw_fbo, trace_poll_err());
 }
-static void hle_glEnable(Cpu *c) { g_gl.p_glEnable(U32(0)); }
+static void hle_glEnable(Cpu *c) {
+    GLenum cap = U32(0);
+    if (cap == GL_STENCIL_TEST) g_cur_stencil_test = true;
+    g_gl.p_glEnable(cap);
+    gl_trace_log_enable_cap(cap, true, trace_poll_err());
+}
 static void hle_glEnableVertexAttribArray(Cpu *c) { g_gl.p_glEnableVertexAttribArray(U32(0)); }
 static void hle_glFinish(Cpu *c) { (void)c; g_gl.p_glFinish(); }
 static void hle_glFramebufferRenderbuffer(Cpu *c) {
@@ -1281,6 +1645,10 @@ static void hle_glFramebufferRenderbuffer(Cpu *c) {
     GLuint rb = U32(3);
     record_offscreen_fbo(target, attachment, true, rb);
     g_gl.p_glFramebufferRenderbuffer(target, attachment, rbt, rb);
+    if (gl_trace_hotkey_enabled()) {
+        GLuint gfbo = (target == GL_READ_FRAMEBUFFER) ? g_guest_read_fbo : g_guest_draw_fbo;
+        gl_trace_on_fbo_attach(gfbo, attachment, true, rb, trace_poll_err());
+    }
 }
 static void hle_glFramebufferTexture2D(Cpu *c) {
     GLenum target = U32(0), attachment = U32(1), textarget = U32(2);
@@ -1288,7 +1656,12 @@ static void hle_glFramebufferTexture2D(Cpu *c) {
     GLint level = I32(4);
     record_offscreen_fbo(target, attachment, false, tex);
     g_gl.p_glFramebufferTexture2D(target, attachment, textarget, tex, level);
+    if (gl_trace_hotkey_enabled()) {
+        GLuint gfbo = (target == GL_READ_FRAMEBUFFER) ? g_guest_read_fbo : g_guest_draw_fbo;
+        gl_trace_on_fbo_attach(gfbo, attachment, false, tex, trace_poll_err());
+    }
 }
+static void hle_glFrontFace(Cpu *c) { g_gl.p_glFrontFace(U32(0)); }
 static void hle_glGenBuffers(Cpu *c) { g_gl.p_glGenBuffers(I32(0), (GLuint *)PTR(1)); }
 static void hle_glGenFramebuffers(Cpu *c) { g_gl.p_glGenFramebuffers(I32(0), (GLuint *)PTR(1)); }
 static void hle_glGenRenderbuffers(Cpu *c) { g_gl.p_glGenRenderbuffers(I32(0), (GLuint *)PTR(1)); }
@@ -1363,6 +1736,7 @@ static void hle_glGetUniformLocation(Cpu *c) {
 
 static void hle_glLinkProgram(Cpu *c) {
     GLuint prog = U32(0);
+    invalidate_atest_cache(prog);
     g_gl.p_glLinkProgram(prog);
     if (g_gl.p_glGetProgramiv) {
         GLint ok = 0;
@@ -1370,10 +1744,36 @@ static void hle_glLinkProgram(Cpu *c) {
         if (ok) {
             int n = __atomic_add_fetch(&g_prog_ok, 1, __ATOMIC_RELAXED);
             if (n == 1 || n % 25 == 0) LOG("[gl] programs linked ok=%d fail=%d\n", n, g_prog_fail);
+            if (gl_trace_hotkey_enabled()) {
+                char snames[16][64];
+                GLenum stypes[16];
+                GLint slocs[16];
+                int ns = 0;
+                GLint nuni = 0;
+                g_gl.p_glGetProgramiv(prog, GL_ACTIVE_UNIFORMS, &nuni);
+                for (GLint i = 0; i < nuni && ns < 16; i++) {
+                    GLsizei len = 0;
+                    GLint sz = 0;
+                    GLenum utype = 0;
+                    char nm[64] = "";
+                    if (g_gl.p_glGetActiveUniform) {
+                        g_gl.p_glGetActiveUniform(prog, (GLuint)i, sizeof nm - 1, &len, &sz, &utype, nm);
+                    }
+                    bool is_samp = (utype >= 0x8B5D && utype <= 0x8B64) || (utype >= 0x8DC0 && utype <= 0x8DCF);
+                    if (is_samp && nm[0]) {
+                        snprintf(snames[ns], 64, "%s", nm);
+                        stypes[ns] = utype;
+                        slocs[ns] = g_gl.p_glGetUniformLocation ? g_gl.p_glGetUniformLocation(prog, nm) : -1;
+                        ns++;
+                    }
+                }
+                gl_trace_on_link_program(prog, ok, NULL, ns, snames, stypes, slocs);
+            }
         } else {
             int nf = __atomic_add_fetch(&g_prog_fail, 1, __ATOMIC_RELAXED);
             char info[2048] = "";
             if (g_gl.p_glGetProgramInfoLog) g_gl.p_glGetProgramInfoLog(prog, sizeof info - 1, NULL, info);
+            gl_trace_on_link_program(prog, ok, info, 0, NULL, NULL, NULL);
             LOG("[gl] PROGRAM LINK FAILED #%u (fail_count=%d): %s\n", prog, nf, info[0] ? info : "(empty)");
         }
     }
@@ -1389,6 +1789,7 @@ static void hle_glRenderbufferStorage(Cpu *c) {
     GLsizei w = I32(2), h = I32(3);
     bool scaled = false;
     GLsizei real_w = w, real_h = h;
+    GLuint rbo = 0;
     if (target == GL_RENDERBUFFER && w > 0 && h > 0) {
         if (g_res_scale_pct > 100 && is_16_9_rt_dims(w, h)) {
             scaled = true;
@@ -1396,16 +1797,22 @@ static void hle_glRenderbufferStorage(Cpu *c) {
             real_h = (GLsizei)(((int64_t)h * g_res_scale_pct) / 100);
         }
         pthread_mutex_lock(&g_gl_lock);
-        obj_dim_set_locked(g_rbo_dims, g_cur_rbo, fmt, w, h, scaled);
+        rbo = g_cur_rbo;
+        obj_dim_set_locked(g_rbo_dims, rbo, fmt, w, h, scaled);
         pthread_mutex_unlock(&g_gl_lock);
     }
     g_gl.p_glRenderbufferStorage(target, fmt, real_w, real_h);
+    if (gl_trace_hotkey_enabled() && target == GL_RENDERBUFFER && w > 0 && h > 0) {
+        gl_trace_on_rbo_storage(rbo, fmt, w, h, real_w, real_h, scaled, trace_poll_err());
+    }
 }
 static void hle_glScissor(Cpu *c) {
-    GLint x = I32(0), y = I32(1);
-    GLsizei w = I32(2), h = I32(3);
+    GLint gx = I32(0), gy = I32(1);
+    GLsizei gw = I32(2), gh = I32(3);
+    GLint x = gx, y = gy;
+    GLsizei w = gw, h = gh;
+    bool scale_cur = false;
     if (g_res_scale_pct > 100) {
-        bool scale_cur = false;
         pthread_mutex_lock(&g_gl_lock);
         scale_cur = fbo_is_scaled_locked(g_guest_draw_fbo);
         pthread_mutex_unlock(&g_gl_lock);
@@ -1417,10 +1824,60 @@ static void hle_glScissor(Cpu *c) {
         }
     }
     g_gl.p_glScissor(x, y, w, h);
+    gl_trace_log_scissor(gx, gy, gw, gh, x, y, w, h, scale_cur, g_guest_draw_fbo, trace_poll_err());
 }
-static void hle_glStencilFunc(Cpu *c) { g_gl.p_glStencilFunc(U32(0), I32(1), U32(2)); }
-static void hle_glStencilMask(Cpu *c) { g_gl.p_glStencilMask(U32(0)); }
-static void hle_glStencilOp(Cpu *c) { g_gl.p_glStencilOp(U32(0), U32(1), U32(2)); }
+static void hle_glStencilFunc(Cpu *c) {
+    GLenum f = U32(0); GLint r = I32(1); GLuint m = U32(2);
+    g_cur_stencil_func = f;
+    g_gl.p_glStencilFunc(f, r, m);
+    gl_trace_log_stencil_func(f, r, m);
+}
+static void hle_glStencilFuncSeparate(Cpu *c) {
+    GLenum face = U32(0), f = U32(1); GLint r = I32(2); GLuint m = U32(3);
+    if (face == GL_FRONT || face == GL_FRONT_AND_BACK) g_cur_stencil_func = f;
+    g_gl.p_glStencilFuncSeparate(face, f, r, m);
+    gl_trace_log_stencil_func_sep(face, f, r, m);
+}
+static void maybe_auto_clear_d24s8_stencil(GLenum face, GLuint new_mask) {
+    if (new_mask != 0u || !g_pending_d24s8_stencil_clear) return;
+    bool affect_front = (face == GL_FRONT || face == GL_FRONT_AND_BACK);
+    bool affect_back = (face == GL_BACK || face == GL_FRONT_AND_BACK);
+    bool was_unlocked = (affect_front && g_stencil_wmask_front != 0u) ||
+                        (affect_back && g_stencil_wmask_back != 0u);
+    g_pending_d24s8_stencil_clear = false;
+    if (g_guest_draw_fbo != 0 && was_unlocked && g_gl.p_glClearBufferiv) {
+        const GLint zero = 0;
+        g_gl.p_glClearBufferiv(GL_STENCIL, 0, &zero);
+        gl_trace_log_clear_buffer_i("glClearBufferiv[d24s8_auto]", GL_STENCIL, 0, &zero, trace_poll_err());
+    }
+}
+static void hle_glStencilMask(Cpu *c) {
+    GLuint m = U32(0);
+    maybe_auto_clear_d24s8_stencil(GL_FRONT_AND_BACK, m);
+    g_stencil_wmask_front = g_stencil_wmask_back = m;
+    g_gl.p_glStencilMask(m);
+    gl_trace_log_stencil_mask(m);
+}
+static void hle_glStencilMaskSeparate(Cpu *c) {
+    GLenum face = U32(0); GLuint m = U32(1);
+    maybe_auto_clear_d24s8_stencil(face, m);
+    if (face == GL_FRONT || face == GL_FRONT_AND_BACK) g_stencil_wmask_front = m;
+    if (face == GL_BACK || face == GL_FRONT_AND_BACK) g_stencil_wmask_back = m;
+    g_gl.p_glStencilMaskSeparate(face, m);
+    gl_trace_log_stencil_mask_sep(face, m);
+}
+static void hle_glStencilOp(Cpu *c) {
+    GLenum sf = U32(0), df = U32(1), dp = U32(2);
+    g_cur_stencil_dppass = dp;
+    g_gl.p_glStencilOp(sf, df, dp);
+    gl_trace_log_stencil_op(sf, df, dp);
+}
+static void hle_glStencilOpSeparate(Cpu *c) {
+    GLenum face = U32(0), sf = U32(1), df = U32(2), dp = U32(3);
+    if (face == GL_FRONT || face == GL_FRONT_AND_BACK) g_cur_stencil_dppass = dp;
+    g_gl.p_glStencilOpSeparate(face, sf, df, dp);
+    gl_trace_log_stencil_op_sep(face, sf, df, dp);
+}
 static void hle_glTexImage2D(Cpu *c) {
     GLenum target = U32(0);
     GLint level = I32(1), int_fmt = I32(2);
@@ -1430,6 +1887,7 @@ static void hle_glTexImage2D(Cpu *c) {
     const void *pixels = STK_PTR(0);
     bool scaled = false;
     GLsizei real_w = w, real_h = h;
+    GLuint tex_id = 0;
     if (target == GL_TEXTURE_2D && level == 0 && w > 0 && h > 0) {
         // Scale 16:9 offscreen render target textures (pixels == NULL); exclude movie uploads (pixels != NULL), UI, and 2048x2048 shadows.
         if (g_res_scale_pct > 100 && pixels == NULL && is_16_9_rt_dims(w, h)) {
@@ -1438,14 +1896,21 @@ static void hle_glTexImage2D(Cpu *c) {
             real_h = (GLsizei)(((int64_t)h * g_res_scale_pct) / 100);
         }
         pthread_mutex_lock(&g_gl_lock);
-        obj_dim_set_locked(g_tex_dims, g_cur_tex2d, (GLenum)int_fmt, w, h, scaled);
+        tex_id = g_cur_tex2d;
+        obj_dim_set_locked(g_tex_dims, tex_id, (GLenum)int_fmt, w, h, scaled);
         pthread_mutex_unlock(&g_gl_lock);
     }
     g_gl.p_glTexImage2D(target, level, int_fmt, real_w, real_h, border, fmt, type, pixels);
+    if (gl_trace_hotkey_enabled() && level == 0 && w > 0 && h > 0) {
+        gl_trace_on_tex_image_2d(tex_id, target, int_fmt, w, h, real_w, real_h, scaled, trace_poll_err());
+    }
 }
 static void hle_glTexParameterf(Cpu *c) { g_gl.p_glTexParameterf(U32(0), U32(1), F32(0)); }
 static void hle_glTexParameterfv(Cpu *c) { g_gl.p_glTexParameterfv(U32(0), U32(1), (const GLfloat *)CPTR(2)); }
 static void hle_glTexParameteri(Cpu *c) { g_gl.p_glTexParameteri(U32(0), U32(1), I32(2)); }
+static void hle_glTexSubImage2D(Cpu *c) {
+    g_gl.p_glTexSubImage2D(U32(0), I32(1), I32(2), I32(3), I32(4), I32(5), U32(6), U32(7), STK_PTR(0));
+}
 
 static void hle_glUniform1f(Cpu *c) { g_gl.p_glUniform1f(I32(0), F32(0)); }
 static void hle_glUniform1fv(Cpu *c) { g_gl.p_glUniform1fv(I32(0), I32(1), (const GLfloat *)CPTR(2)); }
@@ -1467,7 +1932,13 @@ static void hle_glUniformMatrix2fv(Cpu *c) { g_gl.p_glUniformMatrix2fv(I32(0), I
 static void hle_glUniformMatrix3fv(Cpu *c) { g_gl.p_glUniformMatrix3fv(I32(0), I32(1), U8(2), (const GLfloat *)CPTR(3)); }
 static void hle_glUniformMatrix4fv(Cpu *c) { g_gl.p_glUniformMatrix4fv(I32(0), I32(1), U8(2), (const GLfloat *)CPTR(3)); }
 
-static void hle_glUseProgram(Cpu *c) { g_gl.p_glUseProgram(U32(0)); }
+static void hle_glUseProgram(Cpu *c) {
+    GLuint p = U32(0);
+    if (p != g_atest_cached_prog) invalidate_atest_cache(0);
+    g_cur_prog = p;
+    g_gl.p_glUseProgram(p);
+    gl_trace_log_use_program(p, trace_poll_err());
+}
 static void hle_glVertexAttrib1fv(Cpu *c) { g_gl.p_glVertexAttrib1fv(U32(0), (const GLfloat *)CPTR(1)); }
 static void hle_glVertexAttrib2fv(Cpu *c) { g_gl.p_glVertexAttrib2fv(U32(0), (const GLfloat *)CPTR(1)); }
 static void hle_glVertexAttrib3fv(Cpu *c) { g_gl.p_glVertexAttrib3fv(U32(0), (const GLfloat *)CPTR(1)); }
@@ -1476,11 +1947,15 @@ static void hle_glVertexAttribPointer(Cpu *c) {
     g_gl.p_glVertexAttribPointer(U32(0), I32(1), U32(2), U8(3), I32(4), CPTR(5));
 }
 static void hle_glViewport(Cpu *c) {
-    GLint x = I32(0), y = I32(1);
-    GLsizei w = I32(2), h = I32(3);
-    record_viewport_stat(w, h);
+    GLint gx = I32(0), gy = I32(1);
+    GLsizei gw = I32(2), gh = I32(3);
+    GLint x = gx, y = gy;
+    GLsizei w = gw, h = gh;
+    g_cur_vp_w = gw;
+    g_cur_vp_h = gh;
+    record_viewport_stat(gw, gh);
+    bool scale_cur = false;
     if (g_res_scale_pct > 100) {
-        bool scale_cur = false;
         pthread_mutex_lock(&g_gl_lock);
         scale_cur = fbo_is_scaled_locked(g_guest_draw_fbo);
         pthread_mutex_unlock(&g_gl_lock);
@@ -1492,15 +1967,74 @@ static void hle_glViewport(Cpu *c) {
         }
     }
     g_gl.p_glViewport(x, y, w, h);
+    gl_trace_log_viewport(gx, gy, gw, gh, x, y, w, h, scale_cur, g_guest_draw_fbo, trace_poll_err());
 }
 
 // Adjacent safety helpers
-static void hle_glGetError(Cpu *c) { c->x[0] = (uint64_t)(g_gl.p_glGetError ? g_gl.p_glGetError() : 0); }
+static void hle_glGetError(Cpu *c) {
+    GLenum e = gl_trace_hotkey_enabled() ? gl_trace_pop_stashed_error() : 0;
+    if (!e && g_gl.p_glGetError) e = g_gl.p_glGetError();
+    c->x[0] = (uint64_t)e;
+}
 static void hle_glFlush(Cpu *c) { (void)c; if (g_gl.p_glFlush) g_gl.p_glFlush(); }
-static void hle_glClear(Cpu *c) { g_gl.p_glClear(U32(0)); }
-static void hle_glClearColor(Cpu *c) { g_gl.p_glClearColor(F32(0), F32(1), F32(2), F32(3)); }
-static void hle_glClearDepthf(Cpu *c) { g_gl.p_glClearDepthf(F32(0)); }
-static void hle_glClearStencil(Cpu *c) { g_gl.p_glClearStencil(I32(0)); }
+static void hle_glClear(Cpu *c) {
+    GLbitfield m = U32(0);
+    if ((m & GL_STENCIL_BUFFER_BIT) != 0u) g_pending_d24s8_stencil_clear = false;
+    g_gl.p_glClear(m);
+    gl_trace_log_clear(m, trace_poll_err());
+}
+static void hle_glClearColor(Cpu *c) {
+    GLfloat r = F32(0), g = F32(1), b = F32(2), a = F32(3);
+    g_gl.p_glClearColor(r, g, b, a);
+    gl_trace_log_clear_color(r, g, b, a);
+}
+static void hle_glClearDepth(Cpu *c) {
+    GLdouble d = F64(0);
+    g_gl.p_glClearDepth(d);
+    gl_trace_log_clear_depth((GLfloat)d);
+}
+static void hle_glClearDepthf(Cpu *c) {
+    GLfloat d = F32(0);
+    g_gl.p_glClearDepthf(d);
+    gl_trace_log_clear_depth(d);
+}
+static void hle_glClearStencil(Cpu *c) {
+    GLint s = I32(0);
+    g_gl.p_glClearStencil(s);
+    gl_trace_log_clear_stencil(s);
+}
+static void hle_glDepthRange(Cpu *c) { g_gl.p_glDepthRange(F64(0), F64(1)); }
+static void hle_glDepthRangef(Cpu *c) { g_gl.p_glDepthRangef(F32(0), F32(1)); }
+static void hle_glBlitFramebuffer(Cpu *c) {
+    GLint sx0 = I32(0), sy0 = I32(1), sx1 = I32(2), sy1 = I32(3);
+    GLint dx0 = I32(4), dy0 = I32(5), dx1 = I32(6), dy1 = I32(7);
+    GLbitfield mask = STK_U32(0);
+    GLenum filter = STK_U32(1);
+    if (g_res_scale_pct > 100) {
+        pthread_mutex_lock(&g_gl_lock);
+        bool rs = fbo_is_scaled_locked(g_guest_read_fbo);
+        bool ds = fbo_is_scaled_locked(g_guest_draw_fbo);
+        pthread_mutex_unlock(&g_gl_lock);
+        if (rs) {
+            sx0 = (GLint)(((int64_t)sx0 * g_res_scale_pct) / 100);
+            sy0 = (GLint)(((int64_t)sy0 * g_res_scale_pct) / 100);
+            sx1 = (GLint)(((int64_t)sx1 * g_res_scale_pct) / 100);
+            sy1 = (GLint)(((int64_t)sy1 * g_res_scale_pct) / 100);
+        }
+        if (ds) {
+            dx0 = (GLint)(((int64_t)dx0 * g_res_scale_pct) / 100);
+            dy0 = (GLint)(((int64_t)dy0 * g_res_scale_pct) / 100);
+            dx1 = (GLint)(((int64_t)dx1 * g_res_scale_pct) / 100);
+            dy1 = (GLint)(((int64_t)dy1 * g_res_scale_pct) / 100);
+        }
+    }
+    g_gl.p_glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
+    gl_trace_log_blit_framebuffer(g_guest_read_fbo, g_guest_draw_fbo, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1,
+                                  mask, filter, trace_poll_err());
+}
+static void hle_glIsEnabled(Cpu *c) {
+    c->x[0] = (uint64_t)g_gl.p_glIsEnabled(U32(0));
+}
 static void hle_glGetShaderInfoLog(Cpu *c) {
     g_gl.p_glGetShaderInfoLog(U32(0), I32(1), (GLsizei *)PTR(2), (GLchar *)PTR(3));
 }
@@ -1536,18 +2070,28 @@ static const GlEntry g_gl_entries[] = {
     GL_ENT(glBindFramebuffer),
     GL_ENT(glBindRenderbuffer),
     GL_ENT(glBindTexture),
+    GL_ENT(glBlendColor),
+    GL_ENT(glBlendEquation),
     GL_ENT(glBlendEquationSeparate),
+    GL_ENT(glBlendFunc),
     GL_ENT(glBlendFuncSeparate),
+    GL_ENT(glBlitFramebuffer),
     GL_ENT(glBufferData),
+    GL_ENT(glCheckFramebufferStatus),
+    {"glCheckFramebufferStatusEXT", hle_glCheckFramebufferStatus, (void **)&g_gl.p_glCheckFramebufferStatus, false},
     GL_ENT(glClear),
+    GL_ENT(glClearBufferfi),
     GL_ENT(glClearBufferfv),
     GL_ENT(glClearBufferiv),
+    GL_ENT(glClearBufferuiv),
     GL_ENT(glClearColor),
+    GL_ENT(glClearDepth),
     GL_ENT(glClearDepthf),
     GL_ENT(glClearStencil),
     GL_ENT(glColorMask),
     GL_ENT(glCompileShader),
     GL_ENT(glCompressedTexImage2D),
+    GL_ENT(glCopyTexImage2D),
     GL_ENT(glCopyTexSubImage2D),
     GL_ENT(glCreateProgram),
     GL_ENT(glCreateShader),
@@ -1560,6 +2104,8 @@ static const GlEntry g_gl_entries[] = {
     GL_ENT(glDeleteTextures),
     GL_ENT(glDepthFunc),
     GL_ENT(glDepthMask),
+    GL_ENT(glDepthRange),
+    GL_ENT(glDepthRangef),
     GL_ENT(glDisable),
     GL_ENT(glDisableVertexAttribArray),
     GL_ENT(glDrawArrays),
@@ -1572,6 +2118,7 @@ static const GlEntry g_gl_entries[] = {
     GL_ENT(glFlush),
     GL_ENT(glFramebufferRenderbuffer),
     GL_ENT(glFramebufferTexture2D),
+    GL_ENT(glFrontFace),
     GL_ENT(glGenBuffers),
     GL_ENT(glGenFramebuffers),
     GL_ENT(glGenRenderbuffers),
@@ -1592,6 +2139,7 @@ static const GlEntry g_gl_entries[] = {
     GL_ENT(glGetString),
     GL_ENT(glGetStringi),
     GL_ENT(glGetUniformLocation),
+    GL_ENT(glIsEnabled),
     GL_ENT(glLinkProgram),
     GL_ENT(glPixelStorei),
     GL_ENT(glPolygonOffset),
@@ -1601,12 +2149,16 @@ static const GlEntry g_gl_entries[] = {
     GL_ENT(glScissor),
     GL_ENT(glShaderSource),
     GL_ENT(glStencilFunc),
+    GL_ENT(glStencilFuncSeparate),
     GL_ENT(glStencilMask),
+    GL_ENT(glStencilMaskSeparate),
     GL_ENT(glStencilOp),
+    GL_ENT(glStencilOpSeparate),
     GL_ENT(glTexImage2D),
     GL_ENT(glTexParameterf),
     GL_ENT(glTexParameterfv),
     GL_ENT(glTexParameteri),
+    GL_ENT(glTexSubImage2D),
     GL_ENT(glUniform1f),
     GL_ENT(glUniform1fv),
     GL_ENT(glUniform1i),
@@ -1647,6 +2199,7 @@ uint64_t gl_hle_lookup_trampoline(const char *name) {
                     name, e->has_fallback ? " (using HLE fallback)" : " (returning NULL)");
                 if (!e->has_fallback) {
                     __atomic_add_fetch(&g_epa_misses, 1, __ATOMIC_RELAXED);
+                    gl_trace_on_epa_miss(name);
                     return 0;
                 }
             }
@@ -1655,5 +2208,6 @@ uint64_t gl_hle_lookup_trampoline(const char *name) {
         return hle_register(e->name, e->fn);
     }
     __atomic_add_fetch(&g_epa_misses, 1, __ATOMIC_RELAXED);
+    gl_trace_on_epa_miss(name);
     return 0;
 }

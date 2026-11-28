@@ -1,6 +1,7 @@
 // Native OpenGL 4.5 Compatibility window, context handoff, event pump, and frame dump backend.
 #include "gl_backend.h"
 #include "gl_imgui.h"
+#include "gl_trace.h"
 
 #include <SDL3/SDL.h>
 #include <stdatomic.h>
@@ -700,6 +701,7 @@ void gl_backend_swap_buffers(void) {
     gl_imgui_render_in_game_overlay(frame, win_w, win_h, pw, ph, density);
     SDL_GL_SwapWindow(s_window);
     gl_hle_check_post_swap_errors(frame);
+    gl_hle_trace_swap_end(frame);
     input_frame(frame);
     static int64_t s_stop_after_ms = -2;
     if (s_stop_after_ms == -2) {
@@ -749,6 +751,11 @@ int gl_backend_run(void) {
                 LOG("[gl] window closed\n");
                 gl_backend_quit();
                 exit(0);
+            }
+            if (gl_trace_hotkey_enabled() && e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat &&
+                e.key.scancode == SDL_SCANCODE_F9) {
+                gl_trace_request();
+                continue;
             }
             if (menu_handle_event(&e)) continue;
             if (input_user_blocked(&e)) continue;

@@ -629,13 +629,6 @@ static uint32_t svc_wait_for_address(uint64_t addr, uint32_t type, int32_t value
     if (timeout == 0) { pthread_mutex_unlock(&g_klock); return R_TIMEOUT; }
     t_cur->wait_kind = WAIT_ARBITER;
     t_cur->wait_addr = addr;
-    t_cur->wait_kind = WAIT_ARBITER;
-    t_cur->wait_addr = addr;
-    if (addr == 0x700225ad60ull) {
-        static int n;
-        if (n++ < 40) fprintf(stderr, "[ARB_WAIT] addr=%llx type=%u val=%d timeout=%lld lr=%llx cur=%d\n",
-            (unsigned long long)addr, type, value, (long long)timeout, (unsigned long long)t_cur->cpu.x[30], cur);
-    }
     uint32_t r = block_current(timeout);
     pthread_mutex_unlock(&g_klock);
     return r;
@@ -666,11 +659,6 @@ static uint32_t svc_signal_to_address(uint64_t addr, uint32_t type, int32_t valu
     pthread_mutex_lock(&g_klock);
     uint32_t r = R_OK;
     if (type == ARB_SIGNAL) {
-        if (addr == 0x700225ad60ull) {
-            static int n;
-            if (n++ < 40) fprintf(stderr, "[ARB_SIGNAL] addr=%llx type=%u val=%d count=%d lr=%llx\n",
-                (unsigned long long)addr, type, value, count, (unsigned long long)t_cur->cpu.x[30]);
-        }
         arbiter_wake(addr, count);
     } else if (type == ARB_SIGNAL_INC_EQ) {
         if (!arbiter_update(addr, value, value + 1)) r = R_INVALID_STATE;

@@ -188,15 +188,6 @@ static __thread struct {
     uint64_t ret_pc;
 } g_ft_jmp;
 
-void rt_push_ft_jmp(void *jb) {
-    g_ft_jmp.buf = (jmp_buf *)jb;
-    g_ft_jmp.ret_pc = 0x70003e0518ull;
-}
-
-void rt_pop_ft_jmp(void *prev) {
-    g_ft_jmp.buf = (jmp_buf *)prev;
-}
-
 void *rt_get_ft_jmp(void) {
     return (void *)g_ft_jmp.buf;
 }

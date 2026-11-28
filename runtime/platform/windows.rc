@@ -18,12 +18,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Yo-kai Watch 1 Recompiled Contributors"
             VALUE "FileDescription",  "Yo-kai Watch 1 Recompiled - Static Recompilation Runtime"
-            VALUE "FileVersion",      "1.0.0-beta1"
+            VALUE "FileVersion",      "1.0.0-beta2"
             VALUE "InternalName",     "YokaiWatch1Recomp"
             VALUE "LegalCopyright",   "MIT License - User-supplied game assets required"
             VALUE "OriginalFilename", "YokaiWatch1Recomp.exe"
             VALUE "ProductName",      "Yo-kai Watch 1 Recompiled"
-            VALUE "ProductVersion",   "1.0.0-beta1"
+            VALUE "ProductVersion",   "1.0.0-beta2"
         END
     END
     BLOCK "VarFileInfo"

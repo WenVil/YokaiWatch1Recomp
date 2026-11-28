@@ -29,9 +29,9 @@
 
 ## 主要特性
 
-- **OpenGL 4.5 硬件渲染、独显首选与高分辨率超采样**：使用虚拟 `1920x1080` 帧缓冲并支持内部分辨率超采样（`res_scale`：`1x` 1080p / `1.5x` 1620p / `2x` 4K 2160p），导出 `NvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance` 自动优先调度独立显卡，支持窗口 / 无边框全屏 / 独占全屏（`window_mode`）、`16:9` 等比或铺满拉伸（`aspect_mode`）及多档垂直同步（`mailbox` / `fifo` / `immediate`）。
+- **OpenGL 4.5 硬件渲染、透镜修复、独显首选与高分辨率超采样**：使用虚拟 `1920x1080` 帧缓冲并支持内部分辨率超采样（`res_scale`：`1x` 1080p / `1.5x` 1620p / `2x` 4K 2160p），导出 `NvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance` 自动优先调度独立显卡；采用全版本通用的纯 OpenGL 状态机修复妖怪手表搜索透镜缺陷（自动追踪打包 `D24S8` 离屏模板漏清并抑制模板写入阶段的 AlphaTest，彻底消除奇偶帧闪烁与 ~38° 斜向矩形挖空，兼容所有游戏版本）；支持窗口 / 无边框全屏 / 独占全屏（`window_mode`）、`16:9` 等比或铺满拉伸（`aspect_mode`）及多档垂直同步（`mailbox` / `fifo` / `immediate`）。
 - **原生 60 帧模式（带跟随镜头平滑修复）与实时倍速（`1.0x` ~ `3.0x`）**：针对 Switch 日版 `v1.3.0` 原生解锁 **60 FPS**（默认开启，可在启动器或 `F1` 显示设置中随时热切换回原版 `30 FPS`，`fps_mode`），并内置 3D 跟随相机平滑插值修复；未验证版本自动安全维持 `30 FPS`。支持按 **`F3`** 或设置随时切换 `1.0x` / `1.5x` / `2.0x` / `3.0x` 倍速（`game_speed`），可与 60 帧直接叠加并保持过场影片自动回归 `1.0x`。
-- **LayeredFS Mod 覆盖层（`mods/`，重点实测支持英文补丁）**：可将第三方 Switch 民间翻译（如 [GameBanana 英文补丁 Release 1.2.0](https://gamebanana.com/mods/516048)）或汉化/改模包放入 `mods/<Mod名称>/romfs/`，通过 `mods_enabled = 1` 即插即用，增删或切换 Mod 无需重新编译游戏代码，也不改动原始解包文件。
+- **LayeredFS Mod 覆盖层（`mods/`，原生兼容多语言翻译补丁）**：基于通用 Switch RomFS LayeredFS 挂载机制，无需为单一语种单独适配，放入 `mods/<Mod名称>/romfs/` 即可即插即用（社区已实测**英文补丁**与**西班牙语补丁**均正常运行，同样支持法语、意大利语、民间中文补丁及改模包），增删或切换 Mod 无需重新编译游戏代码。
 - **五国语言高 DPI 启动器与 `F1` 实时覆盖菜单**：启动前端与游戏内设置菜单（`F1` 或手柄 `Minus + Plus`）均完整支持 **简体中文 / 繁體中文 / English / 日本語 / 한국어** 高 DPI 无缺字渲染（加载 Windows ClearType/DirectWrite 系统字体与开源 OFL 字体）。
 - **手柄 / 键鼠 / 触摸全面适配**：提供 Nintendo Switch 物理键位与 Xbox 字母键位预设（注意：`Xbox` 仅重映射手柄输入布局，不会替换游戏内显示的 Switch 按键图标），支持全按键自定义、手柄震动强度调节（`rumble_strength`）以及鼠标点击直接映射触屏交互；设置保存在 `yokaiwatch1.ini`。
 - **极速双模块自构建与存档备份**：首次运行通过自带的 `yw1gen.exe` 与精简版 `Zig 0.17.0` 编译器并发重编译 `main` + `sdk` 为 `yw1game_<build16>.dll`（中间产物缓存于 `.gamebuild/`），存档保存于 `save/` 并自动备份到 `save_backups/`。
@@ -51,11 +51,14 @@
 
 ### 第 1 步：下载并完整解压发行包
 
-从 [WenVil/YokaiWatch1Recomp Releases](https://github.com/WenVil/YokaiWatch1Recomp/releases) 页面（`https://github.com/WenVil/YokaiWatch1Recomp`）下载 **`YokaiWatch1Recomp-v1.0.0-beta1-windows.zip`**。
+从 [WenVil/YokaiWatch1Recomp Releases](https://github.com/WenVil/YokaiWatch1Recomp/releases) 页面（`https://github.com/WenVil/YokaiWatch1Recomp`）下载最新发行包 **`YokaiWatch1Recomp-v1.0.0-beta2-windows.zip`**。
 
 > [!WARNING]
 > **务必先将整个 `.zip` 压缩包完整解压到可写的本地目录**（如 `D:\Games\YokaiWatch1Recomp\`），再进入解压目录双击 **`YokaiWatch1Recomp.exe`**。  
 > **切勿直接在 Windows 压缩包预览界面中双击 `.exe`**——程序需要读取同目录下的 DLL、`zig/`、`helper/yw1gen/`、`gamelib-src/` 与字体资源。
+
+> [!TIP]
+> **从 `v1.0.0-beta1` 覆盖升级（免重编译）**：`v1.0.0-beta2` 保持与 `beta1` 完全一致的 `GAMELIB_ID` 二进制兼容接口，老玩家直接解压新版本文件覆盖原目录即可无缝升级，直接复用已有 `yw1game_<build16>.dll` 无需重新编译游戏模块。
 
 ### 第 2 步：准备合法提取的 `exefs` 与 `romfs` 文件夹
 
@@ -92,37 +95,32 @@ YokaiWatch1_GameFiles/
 
 ## Mod 与 LayeredFS 覆盖层使用说明
 
-### 英文补丁（English Translation Mod）使用教程
+### 社区汉化与多语言补丁使用教程
 
 > [!NOTE]
-> **第三方社区作品声明**：下方提供的英文翻译补丁为第三方玩家社区独立制作与分发；`YokaiWatch1Recomp` 项目仓库与发行包均**不内置、不打包、不分发**任何第三方 Mod 或游戏版权资产。
+> **第三方社区作品声明**：以下提及的翻译补丁均为第三方玩家社区独立制作与分发；`YokaiWatch1Recomp` 项目仓库与发行包均**不内置、不打包、不分发**任何第三方 Mod 或游戏版权资产。
 
-- **第三方原帖下载地址**：[*YO-KAI WATCH 1 for Switch English Translation*（GameBanana）](https://gamebanana.com/mods/516048)（`https://gamebanana.com/mods/516048`），已在 Switch 日版 **`v1.3.0`** 下配合英文补丁 **Release 1.2.0** 实测通过。
+`mods/` 采用通用 Switch RomFS LayeredFS 覆盖机制，**原生兼容所有语言的 RomFS 翻译补丁，无需为单一语言单独适配**：
+- **已获社区实测**：**英文补丁**与**西班牙语补丁**均已确认可正常运行；同一机制也直接兼容**法语 / 意大利语 / 民间中文**等各类 Switch RomFS 翻译补丁及贴图/模型/玩法 Mod（`mods/` 下存在多个 Mod 文件夹时按目录名字母序依次叠加）。
+- **已验证英文补丁原帖**：[*YO-KAI WATCH 1 for Switch English Translation*（GameBanana）](https://gamebanana.com/mods/516048)（`https://gamebanana.com/mods/516048`），已在 `v1.3.0` 配合 **Release 1.2.0** 实测通过。
 
-#### 三步安装教程
+#### 三步安装方法
 
-1. 从上述 GameBanana 页面下载英文补丁压缩包并解压。
-2. 在启动器中点击 **「打开 Mods 目录」（Open Mods Folder）**（或 RecompLauncher 的 `mods` 文件夹快捷入口），打开 `<data_root>/mods/` 目录。
-3. 将解压得到的 `0100C0000CEEA000` 文件夹直接复制到 `mods/` 目录中（或新建 `mods/en_patch/` 并把 `romfs/` 放入其中）；确认启动器中 **「启用 mods/ 资源覆盖」（Enable mods/）** 已勾选并显示 **`Mods: 1 个已启用`（`Mods: 1 active`）** 后直接启动游戏（后续更换或增删 Mod **均无需重新编译**）。
+1. 从社区页面（如上述 GameBanana 链接）下载对应语言的 Switch RomFS 补丁压缩包并解压。
+2. 在启动器中点击 **Open Mods Folder / 打开 Mods 目录**（或 RecompLauncher 的 `mods` 文件夹入口），打开 `<data_root>/mods/` 目录。
+3. 将包含 `romfs/` 的文件夹放入 `<data_root>/mods/<mod_name>/romfs/...`（例如自定义目录名 `en_patch`，或直接放入解压出的 `0100C0000CEEA000`），确认启动器中的 **Enable mods/** 已开启（显示如 `Mods: 1 active` / `Mods: 1 个已启用`）即可直接启动（**增删或更换 Mod 无需重新编译**）。
 
-#### 正确与错误目录结构对照
+#### 正确 vs 错误目录结构示例
 
 ```text
-# 正确目录结构：
-<data_root>/mods/
-├── en_patch/
-│   └── romfs/...              （推荐：自定义 Mod 名称文件夹内直接放 romfs）
-└── 0100C0000CEEA000/
-    └── romfs/...              （也正确：直接放置解压出的 Title ID 文件夹）
+# 正确（可正常加载）：
+mods/en_patch/romfs/...
+mods/0100C0000CEEA000/romfs/...
 
-# 错误目录结构（无法识别加载）：
-<data_root>/mods/romfs/...                         （缺少 <Mod名称> 这一层级）
-<data_root>/mods/en_patch/0100C0000CEEA000/romfs/  （多套了一层目录）
+# 错误（无法识别）：
+mods/romfs/...
+mods/en_patch/0100C0000CEEA000/romfs/...
 ```
-
-#### 中文与其它语言 / 改模 Mod 说明
-
-同一套 `mods/` LayeredFS 覆盖机制同样支持其它第三方民间语言补丁（如中文补丁、西班牙语补丁等）以及贴图/模型替换等 Mod；当 `mods/` 下存在多个 Mod 文件夹时，系统会按文件夹名称的**字母顺序**依次叠加覆盖。
 
 ---
 

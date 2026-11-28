@@ -55,6 +55,7 @@ int gl_hle_active_res_scale_pct(void);
 void gl_hle_blit_virtual_fbo(int win_w, int win_h);
 void gl_hle_read_virtual_fbo_rgb(int w, int h, uint8_t *bgr_out);
 void gl_hle_check_post_swap_errors(uint64_t frame_num);
+void gl_hle_trace_swap_end(uint64_t frame_num);
 void gl_hle_record_gl_error(unsigned err, uint64_t frame_num);
 void gl_hle_get_stats(uint64_t *draws_out, uint64_t *gl_errs_out, int *shaders_ok_out, int *shaders_fail_out);
 void gl_hle_get_renderer_strings(const char **vendor_out, const char **renderer_out, const char **version_out);

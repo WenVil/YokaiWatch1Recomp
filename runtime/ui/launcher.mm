@@ -40,7 +40,7 @@ bool controls_ui_took_back(void);
 void boot_prepare(const char *root, int *stage);
 }
 
-#define LARECOMP_VERSION "v1.0.0-beta1"
+#define LARECOMP_VERSION "v1.0.0-beta2"
 extern "C" const char *larecomp_version(void) { return LARECOMP_VERSION; }
 
 extern "C" int g_start_screen = 0;
